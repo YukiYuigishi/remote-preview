@@ -137,7 +137,7 @@ request log:
 
 ## How it works
 
-ブラウザから要求が来ると、ローカル側の `remote-preview` がsystem `ssh` を呼びます。directory listingは短いTTLでcacheし、同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。ファイル内容はcacheしません。
+ブラウザから要求が来ると、ローカル側の `remote-preview` がsystem `ssh` を呼びます。directory listingは短いTTLでcacheし、同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。アイドル時には親と少数の直下directoryをprefetchしますが、ユーザー操作が始まるとprefetchを停止してforegroundのremote accessを優先します。ファイル内容はcacheしません。
 
 ```text
 Browser

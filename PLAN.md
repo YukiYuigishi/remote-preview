@@ -7,6 +7,7 @@
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...` は成功している。
 - 次の主要課題は、ファイル全量読み込みとpreview fallback/HTTP品質（Phase 5）。
 - `cmd/remote-preview`は薄いentrypointで、アプリケーション実装は`internal/preview`に配置されている。
+- foregroundのremote accessはbackground prefetchより優先され、prefetchは操作時に停止する。
 
 ## Product decisions
 

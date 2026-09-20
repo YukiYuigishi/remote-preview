@@ -250,6 +250,92 @@ func TestCachedRemoteFSPrefetchesParentAndChildDirectories(t *testing.T) {
 	}
 }
 
+type priorityRemoteFS struct {
+	mu sync.Mutex
+
+	workspaceStarted chan struct{}
+	workspaceFirst   bool
+	calls            map[string]int
+}
+
+func newPriorityRemoteFS() *priorityRemoteFS {
+	return &priorityRemoteFS{
+		workspaceStarted: make(chan struct{}),
+		workspaceFirst:   true,
+		calls:            make(map[string]int),
+	}
+}
+
+func (f *priorityRemoteFS) Home(context.Context) (string, error) {
+	return "/home/test", nil
+}
+
+func (f *priorityRemoteFS) Kind(context.Context, string) (string, error) {
+	return "dir", nil
+}
+
+func (f *priorityRemoteFS) Read(context.Context, string) ([]byte, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *priorityRemoteFS) List(ctx context.Context, remotePath string) ([]remoteEntry, error) {
+	f.mu.Lock()
+	f.calls[remotePath]++
+	blockWorkspace := remotePath == "/root/workspace" && f.workspaceFirst
+	if blockWorkspace {
+		f.workspaceFirst = false
+		close(f.workspaceStarted)
+	}
+	f.mu.Unlock()
+
+	if blockWorkspace {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	if remotePath == "/root" {
+		return []remoteEntry{{Name: "workspace", Kind: "dir"}}, nil
+	}
+	return nil, nil
+}
+
+func (f *priorityRemoteFS) callCount(remotePath string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[remotePath]
+}
+
+func TestCachedRemoteFSPrioritizesUserListingOverPrefetch(t *testing.T) {
+	backend := newPriorityRemoteFS()
+	cached := newCachedRemoteFSWithOptions(backend, "remote-host", listingCacheOptions{
+		TTL:                    time.Minute,
+		MaxEntries:             10,
+		PrefetchMaxDirectories: 1,
+		PrefetchConcurrency:    1,
+		PrefetchTimeout:        time.Minute,
+	})
+	defer cached.prefetches.cancelAll()
+
+	if _, err := cached.List(context.Background(), "/root"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-backend.workspaceStarted:
+	case <-time.After(time.Second):
+		t.Fatal("workspace prefetch did not start")
+	}
+
+	start := time.Now()
+	if _, err := cached.List(context.Background(), "/root/workspace"); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Fatalf("user listing waited for prefetch: %s", elapsed)
+	}
+	if got := backend.callCount("/root/workspace"); got != 2 {
+		t.Fatalf("workspace listing calls=%d, want canceled prefetch plus user listing", got)
+	}
+}
+
 func hasCachedListing(cache *listingCache, remotePath string) bool {
 	_, ok := cache.peek(remotePath)
 	return ok
