@@ -27,7 +27,7 @@ GitHub Actionsでpush/PR時の検証を自動化し、`v*` tag push時に配布�
 - pull requestとmain branchへのpushでCI workflowが実行される。
 - CIがGo test、race test、vet、build、remote helper generationを検証する。
 - `v*` tag pushでLinux/Darwin amd64/arm64の4 artifactを作成する。
-- 各archiveに`remote-preview`、README、LICENSE、THIRD_PARTY_NOTICES.mdが含まれる。
+- 各archiveに`ykview`、README、LICENSE、THIRD_PARTY_NOTICES.mdが含まれる。
 - `SHA256SUMS`をReleaseへ添付する。
 - Release workflowが既存tagの検証とGitHub Release作成を行う。
 - CIはcontents read、Releaseはcontents writeに限定する。

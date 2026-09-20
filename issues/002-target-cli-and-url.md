@@ -14,14 +14,14 @@
 
 ## Relevant files
 
-- `cmd/remote-preview/*.go`
+- `cmd/ykview/*.go`
 - `README.md`
-- `cmd/remote-preview/main_test.go`
+- `cmd/ykview/main_test.go`
 
 ## Acceptance criteria
 
-- `./remote-preview remote-host:/path/to/dir`が動く。
-- `./remote-preview remote-host`でリモートhomeを開ける。
+- `./ykview remote-host:/path/to/dir`が動く。
+- `./ykview remote-host`でリモートhomeを開ける。
 - `?`、`#`、空白、日本語、`%`を含む名前を一覧から辿れる。
 - pathの`..`でtarget rootを越えない。
 - `-addr :0`で実際のURLが表示される。

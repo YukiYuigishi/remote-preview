@@ -13,9 +13,9 @@ HTTP handlerからSSH実装を切り離し、target、remote access、handler、
 
 ## Relevant files
 
-- `cmd/remote-preview/main.go`
-- `cmd/remote-preview/main_test.go`
-- `cmd/remote-preview/*.go`
+- `cmd/ykview/main.go`
+- `cmd/ykview/main_test.go`
+- `cmd/ykview/*.go`
 
 ## Acceptance criteria
 

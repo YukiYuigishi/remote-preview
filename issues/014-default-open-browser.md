@@ -2,7 +2,7 @@
 
 ## Goal
 
-remote-preview起動時に、生成したpreview URLをデフォルトで既定ブラウザへ開く。
+ykview起動時に、生成したpreview URLをデフォルトで既定ブラウザへ開く。
 
 ## Scope
 

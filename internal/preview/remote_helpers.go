@@ -10,7 +10,7 @@ import (
 )
 
 // The helper artifacts are built with CGO disabled and compressed to keep the
-// main binary smaller. They are generated from cmd/remote-preview-helper for
+// main binary smaller. They are generated from cmd/ykview-helper for
 // the supported POSIX remote targets.
 //
 //go:generate ../../scripts/generate-remote-helpers.sh

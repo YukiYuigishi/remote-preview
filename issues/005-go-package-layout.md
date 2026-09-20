@@ -6,20 +6,20 @@ CLI entrypointとアプリケーション実装を分離し、Goの標準的な`
 
 ## Scope
 
-- `cmd/remote-preview`には薄い`main.go`だけを残す。
+- `cmd/ykview`には薄い`main.go`だけを残す。
 - 実装とテストを`internal/preview` packageへ移す。
 - CLIの公開entrypointを`preview.Run`にする。
 - 既存の動作、package内テスト、build commandを維持する。
 
 ## Relevant files
 
-- `cmd/remote-preview/main.go`
+- `cmd/ykview/main.go`
 - `internal/preview/*.go`
 - `go.mod`
 
 ## Acceptance criteria
 
-- `cmd/remote-preview`がflag引数を受け取り`internal/preview.Run`へ委譲する。
+- `cmd/ykview`がflag引数を受け取り`internal/preview.Run`へ委譲する。
 - アプリケーション実装とテストが`internal/preview`に配置される。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...`が通る。
 - 既存のCLI挙動を維持する。
@@ -35,5 +35,5 @@ CLI entrypointとアプリケーション実装を分離し、Goの標準的な`
 
 ## Current state / blocker
 
-- 完了。`cmd/remote-preview`を薄いentrypointにし、実装とテストを`internal/preview`へ移動済み。
+- 完了。`cmd/ykview`を薄いentrypointにし、実装とテストを`internal/preview`へ移動済み。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...`で検証済み。

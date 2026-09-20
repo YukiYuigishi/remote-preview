@@ -2,7 +2,7 @@
 
 ## Goal
 
-remote-previewのプロセスをまたいでremote-side helperを再利用し、高RTT環境で毎回発生しているhelper binary uploadの転送コストを削減する。
+ykviewのプロセスをまたいでremote-side helperを再利用し、高RTT環境で毎回発生しているhelper binary uploadの転送コストを削減する。
 
 ## Scope
 

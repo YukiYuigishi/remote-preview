@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"remote-preview/internal/remotehelper"
+	"ykview/internal/remotehelper"
 )
 
 type remoteEntry struct {
