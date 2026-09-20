@@ -7,6 +7,7 @@ directory移動直後のSSH競合を避け、必要なdirectoryだけをon-deman
 ## Scope
 
 - background directory prefetchを削除する。
+- foregroundのbatch listingは許可する。
 - directory listingのTTL cacheとsingleflight相当は維持する。
 - prefetch用のcontext、semaphore、設定、テストを削除する。
 - README、PLAN、関連issueに現在の設計を反映する。
@@ -23,7 +24,7 @@ directory移動直後のSSH競合を避け、必要なdirectoryだけをon-deman
 
 ## Acceptance criteria
 
-- directory一覧表示後に親/子directoryの自動SSH listingが発生しない。
+- directory一覧表示後にbackgroundの親/子directory SSH listingが発生しない。
 - ユーザーが移動したdirectoryだけをlistingする。
 - TTL cache、最大エントリ数、同時アクセスのsingleflight、cached entry kindは維持する。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...`が通る。
@@ -39,5 +40,5 @@ directory移動直後のSSH競合を避け、必要なdirectoryだけをon-deman
 
 ## Current state / blocker
 
-- 完了。background directory prefetchを削除し、on-demand listing、TTL cache、singleflight、cached entry kindを維持した。
+- 完了。background directory prefetchを削除し、foreground batch/on-demand listing、TTL cache、singleflight、cached entry kindを維持した。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...`で検証済み。

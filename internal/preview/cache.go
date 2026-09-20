@@ -120,6 +120,21 @@ func (c *listingCache) get(ctx context.Context, remotePath string, fetch func(co
 	return entries, err
 }
 
+func (c *listingCache) store(remotePath string, entries []remoteEntry) {
+	if c.ttl <= 0 || c.max <= 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sequence++
+	c.entries[c.key(remotePath)] = listingCacheEntry{
+		entries:   cloneRemoteEntries(entries),
+		expiresAt: c.now().Add(c.ttl),
+		sequence:  c.sequence,
+	}
+	c.evictIfNeeded()
+}
+
 func (c *listingCache) peek(remotePath string) ([]remoteEntry, bool) {
 	key := c.key(remotePath)
 	c.mu.Lock()
@@ -180,14 +195,44 @@ func (c *cachedRemoteFS) Kind(ctx context.Context, remotePath string) (string, e
 			}
 		}
 	}
+	if batch, ok := c.backend.(batchRemoteFS); ok {
+		result, err := batch.ListBatch(ctx, remotePath)
+		if err == nil {
+			c.storeBatch(remotePath, result)
+			return result.RootKind, nil
+		}
+	}
 	return c.backend.Kind(ctx, remotePath)
 }
 
 func (c *cachedRemoteFS) List(ctx context.Context, remotePath string) ([]remoteEntry, error) {
 	remotePath = path.Clean(remotePath)
 	return c.cache.get(ctx, remotePath, func(fetchCtx context.Context) ([]remoteEntry, error) {
+		if batch, ok := c.backend.(batchRemoteFS); ok {
+			result, err := batch.ListBatch(fetchCtx, remotePath)
+			if err == nil {
+				current, foundCurrent := c.storeBatch(remotePath, result)
+				if foundCurrent {
+					return current, nil
+				}
+			}
+		}
 		return c.backend.List(fetchCtx, remotePath)
 	})
+}
+
+func (c *cachedRemoteFS) storeBatch(remotePath string, result batchListingResult) ([]remoteEntry, bool) {
+	var current []remoteEntry
+	foundCurrent := false
+	for _, listing := range result.Listings {
+		listingPath := path.Clean(listing.Path)
+		c.cache.store(listingPath, listing.Entries)
+		if listingPath == path.Clean(remotePath) {
+			current = cloneRemoteEntries(listing.Entries)
+			foundCurrent = true
+		}
+	}
+	return current, foundCurrent
 }
 
 func (c *cachedRemoteFS) Read(ctx context.Context, remotePath string) ([]byte, error) {

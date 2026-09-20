@@ -3,11 +3,11 @@
 ## Current state
 
 - MVPのread-only SSHファイルプレビューは動作している。
-- Phase 1–4（責務分割、target改善、context-aware system SSH、on-demand directory listing cache）を実装済み。
+- Phase 1–4（責務分割、target改善、context-aware system SSH、portable batch/on-demand directory listing cache）を実装済み。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...` は成功している。
 - 次の主要課題は、ファイル全量読み込みとpreview fallback/HTTP品質（Phase 5）。
 - `cmd/remote-preview`は薄いentrypointで、アプリケーション実装は`internal/preview`に配置されている。
-- directory listingはon-demandで取得し、TTL cacheとsingleflightで再表示・同時アクセスを効率化する。
+- directory listingはforegroundで取得し、必要に応じてportable batch commandで直下分も同じSSHにまとめ、TTL cacheとsingleflightで再利用する。
 
 ## Product decisions
 
@@ -88,7 +88,7 @@ Acceptance criteria:
 - TTLと最大エントリ数を設ける。
 - 同一pathへの同時アクセスはsingleflight相当で重複SSHを抑える。
 - 初回表示では、現在のdirectoryの一覧だけを取得する。
-- 子directoryは先読みせず、ユーザーが移動した時にon-demandで取得する。
+- background prefetchは行わず、cache miss時のforeground batch commandにcurrentと直下directoryをまとめる。
 - read-only前提でも、TTL満了後は再取得できるようにする。
 - cached listingのentry kindを使い、一覧から辿ったdirectory/fileでは不要な`remoteKind`呼び出しを減らす。
 
@@ -96,6 +96,7 @@ Acceptance criteria:
 
 - 同じdirectoryの再表示でSSH listingが発生しない。
 - directory移動時に不要なbackground SSHが発生しない。
+- batch対応環境では、currentと直下directoryのlistingを1回のSSH commandで取得できる。
 - TTL切れ、同時アクセス、SSH失敗時の挙動がテストされている。
 
 ### Phase 5: preview fallbackとHTTPの品質改善
@@ -134,7 +135,7 @@ Acceptance criteria:
 1. 責務分割とRemoteFS interface
 2. target `host` shorthand / remote home / URL encoding
 3. context-aware system SSH backend
-4. directory listing cache
+4. directory listing cache / portable batch listing
 5. Markdown fallbackとHTTP read path
 6. Go SSH prototypeとtransport選択
 7. root confinement policyとドキュメント

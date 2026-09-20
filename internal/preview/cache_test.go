@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"sync"
 	"testing"
 	"time"
@@ -130,6 +131,88 @@ func TestCachedRemoteFSListsOnlyRequestedDirectory(t *testing.T) {
 	}
 	if got := backend.calls("/root/workspace"); got != 0 {
 		t.Fatalf("workspace listing calls=%d, want 0 before navigation", got)
+	}
+}
+
+type fakeBatchRemoteFS struct {
+	*fakeRemoteFS
+	batchCalls int
+	batchErr   error
+}
+
+func (f *fakeBatchRemoteFS) ListBatch(_ context.Context, remotePath string) (batchListingResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.batchCalls++
+	if f.batchErr != nil {
+		return batchListingResult{}, f.batchErr
+	}
+	return batchListingResult{
+		RootKind: "dir",
+		Listings: []remoteListing{
+			{Path: remotePath, Entries: cloneRemoteEntries(f.lists[remotePath])},
+			{Path: path.Join(remotePath, "workspace"), Entries: []remoteEntry{{Name: "notes.md", Kind: "file"}}},
+		},
+	}, nil
+}
+
+func TestCachedRemoteFSDistributesBatchListings(t *testing.T) {
+	backend := &fakeBatchRemoteFS{fakeRemoteFS: newFakeRemoteFS()}
+	backend.lists["/root"] = []remoteEntry{{Name: "workspace", Kind: "dir"}}
+	cached := newCachedRemoteFSWithOptions(backend, "remote-host", listingCacheOptions{TTL: time.Minute, MaxEntries: 10})
+
+	if _, err := cached.List(context.Background(), "/root"); err != nil {
+		t.Fatal(err)
+	}
+	if backend.batchCalls != 1 || backend.calls("/root") != 0 {
+		t.Fatalf("batch calls=%d, regular root calls=%d; want batch=1 regular=0", backend.batchCalls, backend.calls("/root"))
+	}
+
+	entries, err := cached.List(context.Background(), "/root/workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name != "notes.md" {
+		t.Fatalf("unexpected cached child listing: %#v", entries)
+	}
+	if backend.batchCalls != 1 || backend.calls("/root/workspace") != 0 {
+		t.Fatalf("child listing caused another remote call: batch=%d regular=%d", backend.batchCalls, backend.calls("/root/workspace"))
+	}
+}
+
+func TestCachedRemoteFSBatchKindAvoidsSecondSSH(t *testing.T) {
+	backend := &fakeBatchRemoteFS{fakeRemoteFS: newFakeRemoteFS()}
+	backend.lists["/root"] = []remoteEntry{{Name: "workspace", Kind: "dir"}}
+	cached := newCachedRemoteFSWithOptions(backend, "remote-host", listingCacheOptions{TTL: time.Minute, MaxEntries: 10})
+
+	kind, err := cached.Kind(context.Background(), "/root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != "dir" || backend.batchCalls != 1 || backend.kindCallCount("/root") != 0 {
+		t.Fatalf("kind lookup: kind=%q batch=%d regular=%d; want dir/1/0", kind, backend.batchCalls, backend.kindCallCount("/root"))
+	}
+	if _, err := cached.List(context.Background(), "/root"); err != nil {
+		t.Fatal(err)
+	}
+	if backend.batchCalls != 1 || backend.calls("/root") != 0 {
+		t.Fatalf("root list caused another SSH: batch=%d regular=%d", backend.batchCalls, backend.calls("/root"))
+	}
+}
+
+func TestCachedRemoteFSFallsBackWhenBatchListingFails(t *testing.T) {
+	backend := &fakeBatchRemoteFS{
+		fakeRemoteFS: newFakeRemoteFS(),
+		batchErr:     errors.New("batch unavailable"),
+	}
+	backend.lists["/root"] = []remoteEntry{{Name: "file.txt", Kind: "file"}}
+	cached := newCachedRemoteFSWithOptions(backend, "remote-host", listingCacheOptions{TTL: time.Minute, MaxEntries: 10})
+
+	if _, err := cached.List(context.Background(), "/root"); err != nil {
+		t.Fatal(err)
+	}
+	if backend.batchCalls != 1 || backend.calls("/root") != 1 {
+		t.Fatalf("fallback calls: batch=%d regular=%d; want 1/1", backend.batchCalls, backend.calls("/root"))
 	}
 }
 

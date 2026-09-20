@@ -16,6 +16,7 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
   - ssh-agent
   - ControlMaster
   などをそのまま利用
+- リモートのPOSIX `sh`（macOS / BusyBoxを含む）でcurrentと直下directoryをbatch listing
 - ディレクトリ一覧とbreadcrumb navigation
 - HTML: そのままブラウザでpreview
 - Markdown: GitHub Flavored Markdown (GFM) preview
@@ -28,6 +29,7 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
 - source code / JSON / YAML / textなど: text viewer
 - `Raw` 表示
 - directory listingのTTL cacheと同時アクセスの重複抑制
+- macOS / BusyBox互換のforeground batch listing
 - SSH command/connect timeoutとrequest context cancellation
 - read-only
 
@@ -137,7 +139,7 @@ request log:
 
 ## How it works
 
-ブラウザから要求が来ると、ローカル側の `remote-preview` がsystem `ssh` を呼びます。directory listingは必要になったdirectoryだけを取得し、短いTTLでcacheします。同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。ファイル内容はcacheしません。
+ブラウザから要求が来ると、ローカル側の `remote-preview` がsystem `ssh` を呼びます。directory listingはcache miss時にforegroundで取得し、対応backendではcurrentと最大16個の直下directoryのlistingを1回のportable shell commandにまとめます。同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。batch commandが使えない場合はsingle-directory listingへfallbackします。background prefetchは行いません。ファイル内容はcacheしません。
 
 ```text
 Browser
