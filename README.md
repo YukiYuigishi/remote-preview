@@ -27,7 +27,8 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
   - autolinks
 - ` ```mermaid ` fenced code blockをMermaidとして描画
 - PNG/JPEG/WebP/SVGなど: そのまま表示
-- source code / JSON / YAML / textなど: text viewer
+- source code / JSON / YAML / textなど: browser内text viewer
+- 対応するsource codeはhighlight.jsでsyntax highlight（CDN利用可能時）
 - `Raw` 表示
 - directory listingのTTL cacheと同時アクセスの重複抑制
 - macOS / BusyBox互換のforeground batch listing
@@ -40,6 +41,15 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
 make build
 ./bin/remote-preview remote-host:/remote/path
 ```
+
+ユーザーのGo install先（通常は`~/go/bin`）へinstallする場合:
+
+```bash
+make install
+"$(go env GOPATH)/bin/remote-preview" remote-host:/remote/path
+```
+
+`GOBIN`を設定している場合は、Go toolchainの設定に従ってそのdirectoryへinstallされます。実際の配置先は`go env GOBIN`または`go env GOPATH`で確認できます。
 
 ブラウザで:
 
@@ -90,7 +100,7 @@ flowchart LR
 ```
 ````
 
-Markdown renderer / Mermaidは現在jsDelivrからbrowser側で読み込むため、Markdownのrich previewにはインターネット接続が必要です。CDNを読めない場合でもMarkdown sourceは表示されます。
+Markdown renderer / Mermaid / syntax highlightは現在jsDelivrからbrowser側で読み込むため、rich previewとhighlightにはインターネット接続が必要です。CDNを読めない場合でもMarkdown sourceとtext sourceは表示されます。
 
 ## Build
 
@@ -114,6 +124,7 @@ make test       # go test ./...
 make test-race  # go test -race ./...
 make vet        # go vet ./...
 make build-helper # standalone remote-preview-helperをbin/へbuild
+make install    # go install ./cmd/remote-preview（通常は~/go/bin）
 make check      # generate + test + race + vet + build
 make clean      # bin/のMakefile生成物を削除
 ```
@@ -172,7 +183,7 @@ debug logは標準ライブラリの`log/slog`によるkey-value形式で、HTTP
 
 ブラウザから要求が来ると、ローカル側の `remote-preview` がsystem `ssh` を呼びます。directory listingはcache miss時にforegroundで取得し、対応platformではremote `TMPDIR`に残したGo helperがcurrentと最大16個の直下directoryのlistingを1回で取得します。helper cacheがなければatomicにuploadし、同じhelper binaryが残っていればbinary転送を省略します。helperを利用できない場合はportable shell batchへ、さらに失敗した場合はsingle-directory listingへfallbackします。同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。background prefetchは行いません。ファイル内容はcacheしません。
 
-helperは最初のbatch listing時にremote platform判定を行います。cache miss時だけbinary uploadが発生するため、ProxyJumpや高RTTの環境でも同じhelper binaryを使う次回起動では転送コストを抑えられます。cache filenameにはcache version、platform、展開後binaryのSHA-256を含めます。helper実行に失敗した場合は該当cacheを削除してshell batchへfallbackします。
+helperは最初のbatch listing時にremote platform判定を行います。cache miss時だけbinary uploadが発生するため、ProxyJumpや高RTTの環境でも同じhelper binaryを使う次回起動では転送コストを抑えられます。cache filenameにはcache version、platform、展開後binaryのSHA-256を含めます。cache miss時のuploadはSSH channel compressionを使い、remote側にgzip commandを要求しません。helper実行に失敗した場合は該当cacheを削除してshell batchへfallbackします。
 
 ```text
 Browser

@@ -10,6 +10,8 @@
 - directory listingはforegroundで取得し、必要に応じてportable batch commandで直下分も同じSSHにまとめ、TTL cacheとsingleflightで再利用する。
 - debug logは標準ライブラリの`log/slog`でHTTP、cache、batch、SSHの処理境界を追跡できる。
 - remote-side Go helperはIssue 010/015で実装済み。remote `TMPDIR`のversion/hash付きcacheを再利用し、既存shell batchをfallbackとして維持する。
+- helper cache miss時のbinary uploadはSSH compressionを使い、失敗時はraw uploadへfallbackする。
+- text-like fileはbrowser内viewerへ送り、対応source codeはbrowser-side syntax highlightを利用する。CDN unavailable時はplain textへfallbackする。
 - MakefileはIssue 011でbuild、helper生成、test、race、vet、check、cleanを再現する。
 
 ## Product decisions
