@@ -245,3 +245,7 @@ Host *
     ControlPersist 5m
     ControlPath ~/.ssh/cm-%C
 ```
+
+## License
+
+このproject本体はMIT Licenseです。詳細は[`LICENSE`](LICENSE)を参照してください。bundled browser assetの個別licenseは[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)に記載しています。
