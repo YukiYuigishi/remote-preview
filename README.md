@@ -97,6 +97,12 @@ Go 1.23+のみ必要です。Go module dependencyはありません。
 go build -o remote-preview ./cmd/remote-preview
 ```
 
+## Project layout
+
+- `cmd/remote-preview`: CLI entrypoint only
+- `internal/preview`: target parsing、SSH transport、directory cache、HTTP handler、templateとそのtests
+- `issues/`: 実装scopeと検証結果
+
 ## Usage
 
 ```bash

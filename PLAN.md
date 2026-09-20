@@ -6,7 +6,7 @@
 - Phase 1–4（責務分割、target改善、context-aware system SSH、directory listing cache/prefetch）を実装済み。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...` は成功している。
 - 次の主要課題は、ファイル全量読み込みとpreview fallback/HTTP品質（Phase 5）。
-- CLI/server起動、HTTP handler、remote transport、cache、templateは責務ごとに分離されている。
+- `cmd/remote-preview`は薄いentrypointで、アプリケーション実装は`internal/preview`に配置されている。
 
 ## Product decisions
 
