@@ -107,12 +107,29 @@ var textTemplate = template.Must(template.New("text").Parse(`<!doctype html>
     .toolbar { display: flex; gap: .8rem; margin-bottom: 1rem; }
     pre { overflow: auto; padding: 1rem; border-radius: .4rem; background: #8882; }
   </style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/github-dark.min.css">
 </head>
 <body>
   <nav aria-label="Breadcrumb">{{.Breadcrumb}}</nav>
   <h1>{{.Name}}</h1>
   <p><code>{{.RemotePath}}</code></p>
   <div class="toolbar"><a href="{{.RawURL}}">Raw</a></div>
-  <pre>{{.Source}}</pre>
+  <pre><code id="source-code" class="language-{{.Language}}">{{.Source}}</code></pre>
+  <script>
+    const source = {{.SourceJSON}};
+    const language = {{.LanguageJSON}};
+    const sourceCode = document.getElementById('source-code');
+    sourceCode.textContent = source;
+    if (language) {
+      import('https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/+esm')
+        .then((module) => module.default || module)
+        .then((hljs) => {
+          if (hljs.getLanguage(language)) {
+            sourceCode.innerHTML = hljs.highlight(source, { language }).value;
+          }
+        })
+        .catch(() => { sourceCode.textContent = source; });
+    }
+  </script>
 </body>
 </html>`))
