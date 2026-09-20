@@ -39,6 +39,54 @@ func TestSSHRemoteFSAddsConnectionTimeout(t *testing.T) {
 	}
 }
 
+func TestSSHRemoteFSAddsCompressionOnlyWhenRequested(t *testing.T) {
+	remote := newSSHRemoteFS("remote-host")
+	var compressedArgs, rawArgs []string
+	remote.command = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		if containsArg(args, "-C") {
+			compressedArgs = append([]string(nil), args...)
+		} else {
+			rawArgs = append([]string(nil), args...)
+		}
+		return exec.CommandContext(ctx, "sh", "-c", "printf ok")
+	}
+
+	if _, err := remote.runNamedInputWithCompression(context.Background(), "upload", "", []byte("helper"), true, "sh", "-c", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remote.runNamedInput(context.Background(), "command", "", nil, "true"); err != nil {
+		t.Fatal(err)
+	}
+	if !containsArg(compressedArgs, "-C") {
+		t.Fatalf("compressed SSH args do not contain -C: %v", compressedArgs)
+	}
+	if containsArg(rawArgs, "-C") {
+		t.Fatalf("raw SSH args unexpectedly contain -C: %v", rawArgs)
+	}
+}
+
+func TestSSHRemoteFSHelperUploadFallsBackWithoutCompression(t *testing.T) {
+	remote := newSSHRemoteFS("remote-host")
+	compressedAttempts := 0
+	rawAttempts := 0
+	remote.command = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		if containsArg(args, "-C") {
+			compressedAttempts++
+			return exec.CommandContext(ctx, "sh", "-c", "exit 1")
+		}
+		rawAttempts++
+		return exec.CommandContext(ctx, "sh", "-c", "printf /tmp/helper")
+	}
+
+	got, err := remote.uploadHelper(context.Background(), "linux/amd64", ".remote-preview-helper-test", []byte("helper"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/tmp/helper" || compressedAttempts != 1 || rawAttempts != 1 {
+		t.Fatalf("path=%q compressed=%d raw=%d", got, compressedAttempts, rawAttempts)
+	}
+}
+
 func TestSSHRemoteFSCancelStopsCommand(t *testing.T) {
 	remote := newSSHRemoteFS("remote-host")
 	remote.commandTimeout = 30 * time.Second

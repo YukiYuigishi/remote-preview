@@ -439,7 +439,11 @@ func (s *sshRemoteFS) uploadHelper(ctx context.Context, platform, cacheName stri
 		return "", fmt.Errorf("generate helper name: %w", err)
 	}
 	nonce := hex.EncodeToString(nonceBytes)
-	out, err := s.runNamedInput(ctx, "helper_upload", "", binary, "sh", "-c", remoteHelperUploadScript, "sh", cacheName, nonce)
+	out, err := s.runNamedInputWithCompression(ctx, "helper_upload_compressed", "", binary, true, "sh", "-c", remoteHelperUploadScript, "sh", cacheName, nonce)
+	if err != nil && ctx.Err() == nil {
+		slog.Debug("compressed remote helper upload failed; retrying without compression", "host", s.host, "error", err)
+		out, err = s.runNamedInput(ctx, "helper_upload", "", binary, "sh", "-c", remoteHelperUploadScript, "sh", cacheName, nonce)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -532,6 +536,10 @@ func (s *sshRemoteFS) runNamed(ctx context.Context, operation, remotePath string
 }
 
 func (s *sshRemoteFS) runNamedInput(ctx context.Context, operation, remotePath string, input []byte, args ...string) ([]byte, error) {
+	return s.runNamedInputWithCompression(ctx, operation, remotePath, input, false, args...)
+}
+
+func (s *sshRemoteFS) runNamedInputWithCompression(ctx context.Context, operation, remotePath string, input []byte, compression bool, args ...string) ([]byte, error) {
 	started := time.Now()
 	commandTimeout := s.commandTimeout
 	if commandTimeout <= 0 {
@@ -544,14 +552,17 @@ func (s *sshRemoteFS) runNamedInput(ctx context.Context, operation, remotePath s
 
 	runCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
-	slog.Debug("ssh command start", "host", s.host, "operation", operation, "remote_path", remotePath, "timeout", commandTimeout, "input_bytes", len(input))
+	slog.Debug("ssh command start", "host", s.host, "operation", operation, "remote_path", remotePath, "timeout", commandTimeout, "input_bytes", len(input), "compression", compression)
 
-	sshArgs := []string{
-		"-T",
-		"-o", "BatchMode=yes",
-		"-o", "ConnectTimeout=" + sshTimeoutSeconds(connectTimeout),
-		s.host,
+	sshArgs := []string{"-T"}
+	if compression {
+		sshArgs = append(sshArgs, "-C")
 	}
+	sshArgs = append(sshArgs,
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout="+sshTimeoutSeconds(connectTimeout),
+		s.host,
+	)
 	sshArgs = append(sshArgs, shellJoin(args...))
 
 	command := s.command
