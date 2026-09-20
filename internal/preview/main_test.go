@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -54,9 +55,69 @@ func TestParseTarget(t *testing.T) {
 	}
 }
 
-func TestParseTargetRejectsRelativePath(t *testing.T) {
-	if _, err := parseTarget("remote-host:docs"); err == nil {
-		t.Fatal("expected error")
+func TestParseTargetAcceptsRemoteHomeRelativePath(t *testing.T) {
+	for _, input := range []string{"remote-host:~", "remote-host:~/docs", "remote-host:docs", "remote-host:../docs"} {
+		got, err := parseTarget(input)
+		if err != nil {
+			t.Fatalf("parseTarget(%q): %v", input, err)
+		}
+		if got.Host != "remote-host" || !got.Home {
+			t.Fatalf("parseTarget(%q)=%#v, want home-relative target", input, got)
+		}
+	}
+}
+
+func TestResolveTargetHomeRelativePath(t *testing.T) {
+	for input, want := range map[string]string{
+		"remote-host:~":            "/remote/home",
+		"remote-host:~/docs":       "/remote/home/docs",
+		"remote-host:docs/project": "/remote/home/docs/project",
+		"remote-host:../docs":      "/remote/docs",
+	} {
+		target, err := parseTarget(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolved, err := resolveTarget(context.Background(), target, &fakeRemoteFS{home: "/remote/home"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resolved.Root != want || resolved.Home {
+			t.Fatalf("resolveTarget(%q)=%#v, want root %q", input, resolved, want)
+		}
+	}
+}
+
+func TestParseTargetRecognizesLocalPathForms(t *testing.T) {
+	for _, input := range []string{".", "./subdir", "..", "../parent", "/tmp/remote-preview", "~", "~/workspace"} {
+		got, err := parseTarget(input)
+		if err != nil {
+			t.Fatalf("parseTarget(%q): %v", input, err)
+		}
+		if !got.Local || got.Root != input {
+			t.Fatalf("parseTarget(%q)=%#v, want local target", input, got)
+		}
+	}
+}
+
+func TestResolveLocalTargetMakesAbsolutePath(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "workspace")
+	got, err := resolveLocalTarget(remoteTarget{Root: root, Local: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Local || got.Host != "local" || got.Root != root {
+		t.Fatalf("resolved local target=%#v", got)
+	}
+
+	remote, err := parseTarget("remote-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved, err := resolveLocalTarget(remote); err != nil {
+		t.Fatal(err)
+	} else if resolved != remote {
+		t.Fatalf("non-local target changed: before=%#v after=%#v", remote, resolved)
 	}
 }
 

@@ -3,6 +3,7 @@
 ## Current state
 
 - MVPのread-only SSHファイルプレビューは動作している。
+- local filesystem target（relative/absolute path）とremote home-relative target（`~` / relative path）を実装済み。
 - Phase 1–4（責務分割、target改善、context-aware system SSH、portable batch/on-demand directory listing cache）を実装済み。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...` は成功している。
 - 次の主要課題は、ファイル全量読み込みとpreview fallback/HTTP品質（Phase 5）。
@@ -19,8 +20,10 @@
 ## Product decisions
 
 - 対象ユーザーは、対象ホストへSSH接続できる本人。read-only用途を維持する。
+- local targetは`.`, `./...`, `../...`, `~`, absolute pathで指定し、bare nameは既存互換のremote host shorthandとして扱う。
 - `host:/absolute/path` は継続サポートする。
 - `host` だけを指定した場合は、リモートのホームディレクトリを対象にする。
+- `host:~`、`host:~/path`、`host:relative/path`はリモートhome基準で解決する。
 - ブラウザは起動時にデフォルトで開く。自動起動を無効にする場合は`-open=false`を指定する。local listen address (`-addr`) と remote target は別概念として扱う。
 - `~` や相対パスをローカル側で推測せず、リモート側でホームを解決する。
 - シンボリックリンクによるroot外参照は、個人向けread-onlyツールとしては最優先の阻害要因にしない。ただし挙動を明文化し、将来strict root confinementを追加できる構造にする。
