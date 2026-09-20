@@ -55,4 +55,6 @@ directory batch listingのfilesystem探索をremote-side Go helperへ移し、�
 - helperの実行失敗、platform未対応、upload失敗、protocol errorは既存shell batchへfallbackし、さらに既存single-directory listingへfallbackできる。
 - Linux amd64/arm64、darwin amd64/arm64のhelper artifactをembedし、`go generate ./internal/preview`で再生成できる。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...`を通過した。
+- 実SSH smoke testでplatform判定、helper upload、helper batch、終了時cleanupまで確認した。
+- helper初回setupはplatform判定とbinary uploadの追加SSHを伴うため、高RTT/ProxyJump環境では初回表示がshell batchより遅くなり得る。以後は同じremote-preview process内でhelperを再利用する。
 - Windows remote helperは未対応で、現在はplatform unsupportedとしてshell fallbackを試みる。
