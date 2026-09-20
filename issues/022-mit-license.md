@@ -2,7 +2,7 @@
 
 ## Goal
 
-remote-previewのライセンスをMITとしてrepositoryへ明示する。
+ykviewのライセンスをMITとしてrepositoryへ明示する。
 
 ## Scope
 

@@ -1,6 +1,6 @@
 # Third-party browser assets
 
-remote-preview embeds the following browser assets. Versions are pinned in the
+ykview embeds the following browser assets. Versions are pinned in the
 asset download URLs used for this release. The original upstream license files
 are available at the listed source URLs; the bundled JavaScript files also
 retain their upstream license headers where provided.

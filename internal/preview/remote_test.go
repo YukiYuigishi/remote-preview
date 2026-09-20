@@ -221,7 +221,7 @@ func TestSSHRemoteFSHelperCacheHitAvoidsUpload(t *testing.T) {
 func TestSSHRemoteFSHelperFailureFallsBackToShellBatch(t *testing.T) {
 	remote := newSSHRemoteFS("remote-host")
 	remote.helperAttempted = true
-	remote.helperPath = "/tmp/remote-preview-helper-test"
+	remote.helperPath = "/tmp/ykview-helper-test"
 	remote.helperDone = make(chan struct{})
 	close(remote.helperDone)
 	invalidated := false
@@ -254,7 +254,7 @@ func TestSSHRemoteFSHelperFailureFallsBackToShellBatch(t *testing.T) {
 func TestSSHRemoteFSUsesHelperBatch(t *testing.T) {
 	remote := newSSHRemoteFS("remote-host")
 	remote.helperAttempted = true
-	remote.helperPath = "/tmp/remote-preview-helper-test"
+	remote.helperPath = "/tmp/ykview-helper-test"
 	remote.helperDone = make(chan struct{})
 	close(remote.helperDone)
 	remote.command = func(ctx context.Context, _ string, args ...string) *exec.Cmd {

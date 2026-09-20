@@ -2,7 +2,7 @@
 
 ## Goal
 
-`remote-preview`でlocal filesystemを直接閲覧できるようにし、remote targetでもhome基準の`~`・相対pathを利用できるようにする。
+`ykview`でlocal filesystemを直接閲覧できるようにし、remote targetでもhome基準の`~`・相対pathを利用できるようにする。
 
 ## Scope
 
@@ -26,14 +26,14 @@
 
 ## Acceptance criteria
 
-- `remote-preview .`でcurrent working directoryをlocal browserへ表示できる。
-- `remote-preview ./subdir`、`remote-preview ../parent`、`remote-preview /absolute/path`で指定local directory/fileを表示できる。
+- `ykview .`でcurrent working directoryをlocal browserへ表示できる。
+- `ykview ./subdir`、`ykview ../parent`、`ykview /absolute/path`で指定local directory/fileを表示できる。
 - local directoryのlisting、local text/HTML/image/binary fileの表示が既存handlerで動作する。
 - local targetでSSH processを起動しない。
-- `remote-preview remote-host`のremote home shorthandが維持される。
-- `remote-preview remote-host:/absolute/path`が維持される。
-- `remote-preview remote-host:~`と`remote-host:~/path`がremote `$HOME`基準で解決される。
-- `remote-preview remote-host:relative/path`もremote `$HOME`基準で解決される。
+- `ykview remote-host`のremote home shorthandが維持される。
+- `ykview remote-host:/absolute/path`が維持される。
+- `ykview remote-host:~`と`remote-host:~/path`がremote `$HOME`基準で解決される。
+- `ykview remote-host:relative/path`もremote `$HOME`基準で解決される。
 - remote targetの`..`は既存のpath cleaning方針に従い、解決後のabsolute pathとして扱われる。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...`が通る。
 

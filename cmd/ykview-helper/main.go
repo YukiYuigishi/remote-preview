@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"remote-preview/internal/remotehelper"
+	"ykview/internal/remotehelper"
 )
 
 func main() {

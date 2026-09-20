@@ -2,12 +2,12 @@
 
 ## Goal
 
-remote-previewをインターネット接続なしでもMarkdown、Mermaid、syntax highlightまで利用できる自己完結したCLIにする。
+ykviewをインターネット接続なしでもMarkdown、Mermaid、syntax highlightまで利用できる自己完結したCLIにする。
 
 ## Scope
 
 - marked、Mermaid、highlight.jsのbrowser bundleをversion固定してrepositoryへ同梱する。
-- Go `embed`でremote-preview binaryへassetを含める。
+- Go `embed`でykview binaryへassetを含める。
 - local HTTP endpointからbrowserへassetを配信する。
 - templateからjsDelivrなど外部CDNへのruntime requestを削除する。
 - third-party versionとlicenseをrepositoryへ記録する。
@@ -26,7 +26,7 @@ remote-previewをインターネット接続なしでもMarkdown、Mermaid、syn
 
 ## Acceptance criteria
 
-- clean checkoutの`remote-preview` binaryだけでMarkdown viewerが動作する。
+- clean checkoutの`ykview` binaryだけでMarkdown viewerが動作する。
 - Mermaidとsyntax highlightのJS/CSSをlocalhostから配信する。
 - templateに外部CDN URLを残さない。
 - asset endpointがGET/HEADに対応し、未知assetや不正pathを404にする。
@@ -71,7 +71,7 @@ remote-previewをインターネット接続なしでもMarkdown、Mermaid、syn
 
 ## Design decisions
 
-- browser assetは`go:embed`でremote-preview binaryへ同梱し、versionedな`/_remote-preview/assets/v1/`からGET/HEAD配信する。asset versionを更新した場合はURL versionも更新し、immutable cacheを安全に利用する。
+- browser assetは`go:embed`でykview binaryへ同梱し、versionedな`/_ykview/assets/v1/`からGET/HEAD配信する。asset versionを更新した場合はURL versionも更新し、immutable cacheを安全に利用する。
 - npm build pipelineは導入せず、upstream browser bundleをversion固定して同梱した。
 - runtime CDN依存を削除し、asset取得やrich renderingに失敗した場合は既存のsource/plain text fallbackを使う。
 - Mermaid bundleによりbinary sizeは増えるが、初期実装では圧縮展開などの複雑な仕組みを導入しない。
@@ -83,7 +83,7 @@ remote-previewをインターネット接続なしでもMarkdown、Mermaid、syn
 - `go vet ./...`: passed
 - `go build ./...`: passed
 - `make check`: passed
-- `make install`: passed; installed `/Users/yuki/go/bin/remote-preview`
+- `make install`: passed; installed `/Users/yuki/go/bin/ykview`
 - asset endpointのGET/HEAD/404をunit testで確認。
 - templateにruntime CDN URLがないことをunit testで確認。
 - installed binaryからversioned asset endpointをcurlし、embedded JavaScriptの配信を確認。

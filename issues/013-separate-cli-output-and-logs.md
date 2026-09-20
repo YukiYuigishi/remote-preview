@@ -15,7 +15,7 @@
 
 - `internal/preview/main.go`
 - `internal/preview/main_test.go`
-- `cmd/remote-preview/main.go`
+- `cmd/ykview/main.go`
 - `internal/preview/logging.go`
 - `README.md`
 

@@ -63,8 +63,8 @@ var markdownTemplate = template.Must(template.New("markdown").Parse(`<!doctype h
   <div id="notice" class="notice" hidden></div>
   <article id="rendered"></article>
   <pre id="source" hidden></pre>
-  <script src="/_remote-preview/assets/v1/marked.js"></script>
-  <script src="/_remote-preview/assets/v1/mermaid.js"></script>
+  <script src="/_ykview/assets/v1/marked.js"></script>
+  <script src="/_ykview/assets/v1/mermaid.js"></script>
   <script>
     const source = {{.SourceJSON}};
     const rendered = document.getElementById('rendered');
@@ -110,7 +110,7 @@ var textTemplate = template.Must(template.New("text").Parse(`<!doctype html>
     .toolbar { display: flex; gap: .8rem; margin-bottom: 1rem; }
     pre { overflow: auto; padding: 1rem; border-radius: .4rem; background: #8882; }
   </style>
-  <link rel="stylesheet" href="/_remote-preview/assets/v1/highlight.css">
+  <link rel="stylesheet" href="/_ykview/assets/v1/highlight.css">
 </head>
 <body>
   <nav aria-label="Breadcrumb">{{.Breadcrumb}}</nav>
@@ -118,7 +118,7 @@ var textTemplate = template.Must(template.New("text").Parse(`<!doctype html>
   <p><code>{{.RemotePath}}</code></p>
   <div class="toolbar"><a href="{{.RawURL}}">Raw</a></div>
   <pre><code id="source-code" class="language-{{.Language}}">{{.Source}}</code></pre>
-  <script src="/_remote-preview/assets/v1/highlight.js"></script>
+  <script src="/_ykview/assets/v1/highlight.js"></script>
   <script>
     const source = {{.SourceJSON}};
     const language = {{.LanguageJSON}};

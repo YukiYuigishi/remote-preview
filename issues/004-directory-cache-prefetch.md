@@ -14,11 +14,11 @@ directory listingだけをTTL付きでcacheし、同時アクセスの重複SSH�
 
 ## Relevant files
 
-- `cmd/remote-preview/cache.go`
-- `cmd/remote-preview/remote.go`
-- `cmd/remote-preview/main.go`
-- `cmd/remote-preview/handler.go`
-- `cmd/remote-preview/*_test.go`
+- `cmd/ykview/cache.go`
+- `cmd/ykview/remote.go`
+- `cmd/ykview/main.go`
+- `cmd/ykview/handler.go`
+- `cmd/ykview/*_test.go`
 
 ## Acceptance criteria
 

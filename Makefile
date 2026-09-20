@@ -1,8 +1,8 @@
 GO ?= go
 BINDIR ?= bin
 
-APP := $(BINDIR)/remote-preview
-HELPER := $(BINDIR)/remote-preview-helper
+APP := $(BINDIR)/ykview
+HELPER := $(BINDIR)/ykview-helper
 
 .PHONY: all build build-helper install generate test test-race vet check clean
 
@@ -10,14 +10,14 @@ all: build
 
 build: generate
 	mkdir -p "$(BINDIR)"
-	$(GO) build -trimpath -o "$(APP)" ./cmd/remote-preview
+	$(GO) build -trimpath -o "$(APP)" ./cmd/ykview
 
 build-helper:
 	mkdir -p "$(BINDIR)"
-	$(GO) build -trimpath -o "$(HELPER)" ./cmd/remote-preview-helper
+	$(GO) build -trimpath -o "$(HELPER)" ./cmd/ykview-helper
 
 install:
-	$(GO) install -trimpath ./cmd/remote-preview
+	$(GO) install -trimpath ./cmd/ykview
 
 generate:
 	GO="$(GO)" $(GO) generate ./internal/preview
@@ -36,7 +36,7 @@ check: generate
 	$(GO) test -race ./...
 	$(GO) vet ./...
 	mkdir -p "$(BINDIR)"
-	$(GO) build -trimpath -o "$(APP)" ./cmd/remote-preview
+	$(GO) build -trimpath -o "$(APP)" ./cmd/ykview
 
 clean:
 	rm -f "$(APP)" "$(HELPER)"

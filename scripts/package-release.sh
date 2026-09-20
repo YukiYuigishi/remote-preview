@@ -11,21 +11,21 @@ version=$1
 output_dir=${2:-dist}
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
-staging_dir=$(mktemp -d "${TMPDIR:-/tmp}/remote-preview-release.XXXXXX")
+staging_dir=$(mktemp -d "${TMPDIR:-/tmp}/ykview-release.XXXXXX")
 trap 'rm -rf "$staging_dir"' EXIT HUP INT TERM
 
 mkdir -p "$output_dir"
 for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
 	goos=${target%-*}
 	goarch=${target#*-}
-	archive_base="remote-preview-${version}-${target}"
+	archive_base="ykview-${version}-${target}"
 	package_dir="$staging_dir/$archive_base"
 	mkdir -p "$package_dir"
 
 	GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build \
 		-trimpath -buildvcs=false -ldflags='-s -w -buildid=' \
-		-o "$package_dir/remote-preview" \
-		"$repo_root/cmd/remote-preview"
+		-o "$package_dir/ykview" \
+		"$repo_root/cmd/ykview"
 	cp "$repo_root/README.md" "$repo_root/LICENSE" "$repo_root/THIRD_PARTY_NOTICES.md" "$package_dir/"
 	tar -czf "$output_dir/$archive_base.tar.gz" -C "$staging_dir" "$archive_base"
 done

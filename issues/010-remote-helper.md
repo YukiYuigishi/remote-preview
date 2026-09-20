@@ -6,7 +6,7 @@ directory batch listingのfilesystem探索をremote-side Go helperへ移し、�
 
 ## Scope
 
-- `cmd/remote-preview-helper`に標準ライブラリだけの短命CLIを追加する。
+- `cmd/ykview-helper`に標準ライブラリだけの短命CLIを追加する。
 - helperへcurrent directoryと最大16個の直下directoryのlistingを実行させる。
 - 既存のNUL区切りbatch protocolをhelperから出力し、既存parser/cacheへ渡す。
 - `sshRemoteFS`がhelper binaryをremote temporary directoryへ配置し、SSH経由で起動する。
@@ -16,7 +16,7 @@ directory batch listingのfilesystem探索をremote-side Go helperへ移し、�
 
 ## Relevant files
 
-- `cmd/remote-preview-helper/main.go`
+- `cmd/ykview-helper/main.go`
 - `internal/preview/remote.go`
 - `internal/preview/remote_batch_test.go`
 - `internal/preview/remote_test.go`
@@ -50,11 +50,11 @@ directory batch listingのfilesystem探索をremote-side Go helperへ移し、�
 
 ## Current state / blocker
 
-- `internal/remotehelper`と`cmd/remote-preview-helper`を追加し、既存NUL protocolをhelperから出力するようにした。
+- `internal/remotehelper`と`cmd/ykview-helper`を追加し、既存NUL protocolをhelperから出力するようにした。
 - `sshRemoteFS`は初回batch時にremote platformとversion/hash付きhelper cacheをprobeし、cache miss時だけ対応するcompressed helper artifactをremote `TMPDIR`へatomic uploadして実行する。
 - helperの実行失敗、platform未対応、upload失敗、protocol errorは既存shell batchへfallbackし、さらに既存single-directory listingへfallbackできる。
 - Linux amd64/arm64、darwin amd64/arm64のhelper artifactをembedし、`go generate ./internal/preview`で再生成できる。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...`を通過した。
 - 実SSH smoke testでplatform判定、helper upload、helper batch、終了時cleanupまで確認した。persistent cache化後の実remote cache hitはIssue 015のverification対象とする。通常終了時のcleanupはpersistent cache化に伴い行わない。
-- helper初回setupはplatform判定とcache miss時のbinary uploadを伴うため、高RTT/ProxyJump環境ではcache miss時の初回表示がshell batchより遅くなり得る。同じhelper binaryがremoteに残っていれば、別のremote-preview processからも再利用する。
+- helper初回setupはplatform判定とcache miss時のbinary uploadを伴うため、高RTT/ProxyJump環境ではcache miss時の初回表示がshell batchより遅くなり得る。同じhelper binaryがremoteに残っていれば、別のykview processからも再利用する。
 - Windows remote helperは未対応で、現在はplatform unsupportedとしてshell fallbackを試みる。

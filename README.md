@@ -1,4 +1,4 @@
-# remote-preview
+# ykview
 
 SSH先のディレクトリを、ローカルブラウザから **read-only Webファイラー** として閲覧する小さなCLIです。
 
@@ -40,14 +40,14 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
 
 ```bash
 make build
-./bin/remote-preview remote-host:/remote/path
+./bin/ykview remote-host:/remote/path
 ```
 
 ユーザーのGo install先（通常は`~/go/bin`）へinstallする場合:
 
 ```bash
 make install
-"$(go env GOPATH)/bin/remote-preview" remote-host:/remote/path
+"$(go env GOPATH)/bin/ykview" remote-host:/remote/path
 ```
 
 `GOBIN`を設定している場合は、Go toolchainの設定に従ってそのdirectoryへinstallされます。実際の配置先は`go env GOBIN`または`go env GOPATH`で確認できます。
@@ -61,7 +61,7 @@ http://127.0.0.1:8080/
 ## Example
 
 ```bash
-./remote-preview-darwin-arm64 remote-user@remote.example.com:/remote/path
+./ykview-darwin-arm64 remote-user@remote.example.com:/remote/path
 ```
 
 普段 `~/.ssh/config` にaliasを書いているなら、そのaliasをそのまま使えます。
@@ -78,7 +78,7 @@ Host bastion
 ```
 
 ```bash
-./remote-preview-darwin-arm64 remote-host:/remote/path
+./ykview-darwin-arm64 remote-host:/remote/path
 ```
 
 ## Markdown / Mermaid
@@ -101,7 +101,7 @@ flowchart LR
 ```
 ````
 
-Markdown renderer / Mermaid / syntax highlightのbrowser assetはremote-preview binaryへ同梱し、localhostから配信します。そのため、通常のpreview表示に外部インターネット接続は必要ありません。assetの読み込みやrich renderingに失敗した場合でもMarkdown sourceとtext sourceへfallbackします。assetのversionとlicenseは`THIRD_PARTY_NOTICES.md`に記録しています。
+Markdown renderer / Mermaid / syntax highlightのbrowser assetはykview binaryへ同梱し、localhostから配信します。そのため、通常のpreview表示に外部インターネット接続は必要ありません。assetの読み込みやrich renderingに失敗した場合でもMarkdown sourceとtext sourceへfallbackします。assetのversionとlicenseは`THIRD_PARTY_NOTICES.md`に記録しています。
 
 ## Build
 
@@ -109,7 +109,7 @@ Go 1.23+のみ必要です。Go module dependencyはありません。通常のb
 
 ```bash
 make build
-./bin/remote-preview remote-host:/remote/path
+./bin/ykview remote-host:/remote/path
 ```
 
 remote-side helperの埋め込みartifactはLinux/darwinのamd64/arm64向けに同梱しています。artifactを再生成する場合は次を実行します。
@@ -124,8 +124,8 @@ make generate
 make test       # go test ./...
 make test-race  # go test -race ./...
 make vet        # go vet ./...
-make build-helper # standalone remote-preview-helperをbin/へbuild
-make install    # go install ./cmd/remote-preview（通常は~/go/bin）
+make build-helper # standalone ykview-helperをbin/へbuild
+make install    # go install ./cmd/ykview（通常は~/go/bin）
 make check      # generate + test + race + vet + build
 make clean      # bin/のMakefile生成物を削除
 ```
@@ -150,8 +150,8 @@ scripts/package-release.sh v0.1.0 dist
 
 ## Project layout
 
-- `cmd/remote-preview`: CLI entrypoint only
-- `cmd/remote-preview-helper`: remote-side filesystem helper entrypoint
+- `cmd/ykview`: CLI entrypoint only
+- `cmd/ykview-helper`: remote-side filesystem helper entrypoint
 - `internal/preview`: target parsing、SSH transport、directory cache、HTTP handler、templateとそのtests
 - `internal/preview/assets.go`: 同梱browser assetのembedとlocalhost配信
 - `internal/preview/assets`: marked、Mermaid、highlight.js/CSSのversion固定asset
@@ -167,40 +167,40 @@ scripts/package-release.sh v0.1.0 dist
 ## Usage
 
 ```bash
-./bin/remote-preview [options] target
+./bin/ykview [options] target
 ```
 
 local filesystemを表示する場合:
 
 ```bash
-./bin/remote-preview .
-./bin/remote-preview ./subdir
-./bin/remote-preview /absolute/path
+./bin/ykview .
+./bin/ykview ./subdir
+./bin/ykview /absolute/path
 ```
 
 リモートhomeを開く場合はhostだけを指定できます。
 
 ```bash
-./bin/remote-preview remote-host
+./bin/ykview remote-host
 ```
 
 リモートのhome基準のpathも指定できます。
 
 ```bash
-./bin/remote-preview remote-host:~/projects
-./bin/remote-preview remote-host:projects
+./bin/ykview remote-host:~/projects
+./bin/ykview remote-host:projects
 ```
 
 ブラウザはデフォルトで自動的に開きます。自動起動を無効にする場合:
 
 ```bash
-./bin/remote-preview -open=false remote-host:/remote/path
+./bin/ykview -open=false remote-host:/remote/path
 ```
 
 listen address変更:
 
 ```bash
-./bin/remote-preview -addr 127.0.0.1:7391 remote-host:/remote/path
+./bin/ykview -addr 127.0.0.1:7391 remote-host:/remote/path
 ```
 
 指定portが使用中の場合は、同じhostの後続portへ自動的にずらしてlistenします。空いているportを使う場合は`-addr :0`を指定できます。実際にlistenしたURLが`open: http://.../`形式の通常出力として表示されます。diagnostic logはstderrへ出力されます。
@@ -208,20 +208,20 @@ listen address変更:
 request log:
 
 ```bash
-./bin/remote-preview -v remote-host:/remote/path
+./bin/ykview -v remote-host:/remote/path
 ```
 
 debug log:
 
 ```bash
-DEBUG=1 ./bin/remote-preview -addr 127.0.0.1:7391 remote-host:/remote/path
+DEBUG=1 ./bin/ykview -addr 127.0.0.1:7391 remote-host:/remote/path
 ```
 
 debug logは標準ライブラリの`log/slog`によるkey-value形式で、HTTP request、cache hit/miss、batch listingのfallback、SSH commandの`operation`・`remote_path`・`duration`・`bytes`を出力します。`DEBUG`未設定時はdebug levelのログを出力しません。`-v`は通常のrequest logを有効にします。
 
 ## How it works
 
-ブラウザから要求が来ると、ローカル側の `remote-preview` がsystem `ssh` を呼びます。directory listingはcache miss時にforegroundで取得し、対応platformではremote `TMPDIR`に残したGo helperがcurrentと最大16個の直下directoryのlistingを1回で取得します。helper cacheがなければatomicにuploadし、同じhelper binaryが残っていればbinary転送を省略します。helperを利用できない場合はportable shell batchへ、さらに失敗した場合はsingle-directory listingへfallbackします。同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。background prefetchは行いません。ファイル内容はcacheしません。
+ブラウザから要求が来ると、ローカル側の `ykview` がsystem `ssh` を呼びます。directory listingはcache miss時にforegroundで取得し、対応platformではremote `TMPDIR`に残したGo helperがcurrentと最大16個の直下directoryのlistingを1回で取得します。helper cacheがなければatomicにuploadし、同じhelper binaryが残っていればbinary転送を省略します。helperを利用できない場合はportable shell batchへ、さらに失敗した場合はsingle-directory listingへfallbackします。同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。background prefetchは行いません。ファイル内容はcacheしません。
 
 helperは最初のbatch listing時にremote platform判定を行います。cache miss時だけbinary uploadが発生するため、ProxyJumpや高RTTの環境でも同じhelper binaryを使う次回起動では転送コストを抑えられます。cache filenameにはcache version、platform、展開後binaryのSHA-256を含めます。cache miss時のuploadはSSH channel compressionを使い、remote側にgzip commandを要求しません。helper実行に失敗した場合は該当cacheを削除してshell batchへfallbackします。
 
@@ -230,7 +230,7 @@ Browser
    |
    | HTTP localhost
    v
-remote-preview
+ykview
    |
    | system ssh
    | (~/.ssh/config / ProxyJump / agent ...)

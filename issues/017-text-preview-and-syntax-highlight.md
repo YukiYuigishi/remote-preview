@@ -2,7 +2,7 @@
 
 ## Goal
 
-text系ファイルをdownload扱いにせず、remote-previewのブラウザ上で常に読みやすく表示する。可能な場合はsyntax highlightも提供する。
+text系ファイルをdownload扱いにせず、ykviewのブラウザ上で常に読みやすく表示する。可能な場合はsyntax highlightも提供する。
 
 ## Scope
 

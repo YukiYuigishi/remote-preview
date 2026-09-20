@@ -15,7 +15,7 @@ var previewAssetFiles embed.FS
 
 // Bump this when the embedded asset set changes so browsers can keep using an
 // immutable cached copy for the current binary.
-const previewAssetPrefix = "/_remote-preview/assets/v1/"
+const previewAssetPrefix = "/_ykview/assets/v1/"
 
 var previewAssetContentTypes = map[string]string{
 	"marked.js":     "text/javascript; charset=utf-8",

@@ -1,5 +1,5 @@
 // Package remotehelper implements the short-lived filesystem helper executed
-// on the remote host by remote-preview.
+// on the remote host by ykview.
 package remotehelper
 
 import (

@@ -13,9 +13,9 @@ system `ssh` backendに明示的な接続・コマンドtimeoutを追加し、HT
 
 ## Relevant files
 
-- `cmd/remote-preview/remote.go`
-- `cmd/remote-preview/main.go`
-- `cmd/remote-preview/*_test.go`
+- `cmd/ykview/remote.go`
+- `cmd/ykview/main.go`
+- `cmd/ykview/*_test.go`
 
 ## Acceptance criteria
 

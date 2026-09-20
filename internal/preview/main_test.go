@@ -28,7 +28,7 @@ func TestWriteStartupInfoUsesPlainURLOutput(t *testing.T) {
 }
 
 func TestCLIOptionsOpenByDefault(t *testing.T) {
-	options := newCLIOptions("remote-preview")
+	options := newCLIOptions("ykview")
 	if err := options.flags.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestCLIOptionsOpenByDefault(t *testing.T) {
 		t.Fatal("expected browser opening to be enabled by default")
 	}
 
-	options = newCLIOptions("remote-preview")
+	options = newCLIOptions("ykview")
 	if err := options.flags.Parse([]string{"-open=false"}); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestResolveTargetHomeRelativePath(t *testing.T) {
 }
 
 func TestParseTargetRecognizesLocalPathForms(t *testing.T) {
-	for _, input := range []string{".", "./subdir", "..", "../parent", "/tmp/remote-preview", "~", "~/workspace"} {
+	for _, input := range []string{".", "./subdir", "..", "../parent", "/tmp/ykview", "~", "~/workspace"} {
 		got, err := parseTarget(input)
 		if err != nil {
 			t.Fatalf("parseTarget(%q): %v", input, err)

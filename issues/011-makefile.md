@@ -20,8 +20,8 @@
 
 ## Acceptance criteria
 
-- `make build`がclean checkoutで成功し、`bin/remote-preview`を生成する。
-- `make build-helper`が`bin/remote-preview-helper`を生成する。
+- `make build`がclean checkoutで成功し、`bin/ykview`を生成する。
+- `make build-helper`が`bin/ykview-helper`を生成する。
 - `make generate`がhelper artifactを再生成する。
 - `make test`、`make test-race`、`make vet`、`make check`が対応するGo commandを実行する。
 - `make clean`がMakefileの生成物だけを削除する。
