@@ -11,7 +11,7 @@ directory batch listingのfilesystem探索をremote-side Go helperへ移し、�
 - 既存のNUL区切りbatch protocolをhelperから出力し、既存parser/cacheへ渡す。
 - `sshRemoteFS`がhelper binaryをremote temporary directoryへ配置し、SSH経由で起動する。
 - helper利用失敗時は既存shell batch、さらにsingle-directory listingへfallbackする。
-- helperのplatform選択、protocol version、cleanupをtransport層に閉じ込める。
+- helperのplatform選択、protocol version、cache lifecycleをtransport層に閉じ込める。
 - background prefetchは復活させない。
 
 ## Relevant files
@@ -45,16 +45,16 @@ directory batch listingのfilesystem探索をremote-side Go helperへ移し、�
 - local helper integration test
 - helper failureからshell fallbackへのtest
 - platform selection test
-- cleanup test
+- persistent cache hit / invalidate test
 - 上記4つのGo regression command
 
 ## Current state / blocker
 
 - `internal/remotehelper`と`cmd/remote-preview-helper`を追加し、既存NUL protocolをhelperから出力するようにした。
-- `sshRemoteFS`は初回batch時にremote platformを判定し、対応するcompressed helper artifactをremote temporary pathへuploadして実行する。
+- `sshRemoteFS`は初回batch時にremote platformとversion/hash付きhelper cacheをprobeし、cache miss時だけ対応するcompressed helper artifactをremote `TMPDIR`へatomic uploadして実行する。
 - helperの実行失敗、platform未対応、upload失敗、protocol errorは既存shell batchへfallbackし、さらに既存single-directory listingへfallbackできる。
 - Linux amd64/arm64、darwin amd64/arm64のhelper artifactをembedし、`go generate ./internal/preview`で再生成できる。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...`を通過した。
-- 実SSH smoke testでplatform判定、helper upload、helper batch、終了時cleanupまで確認した。
-- helper初回setupはplatform判定とbinary uploadの追加SSHを伴うため、高RTT/ProxyJump環境では初回表示がshell batchより遅くなり得る。以後は同じremote-preview process内でhelperを再利用する。
+- 実SSH smoke testでplatform判定、helper upload、helper batch、終了時cleanupまで確認した。persistent cache化後の実remote cache hitはIssue 015のverification対象とする。通常終了時のcleanupはpersistent cache化に伴い行わない。
+- helper初回setupはplatform判定とcache miss時のbinary uploadを伴うため、高RTT/ProxyJump環境ではcache miss時の初回表示がshell batchより遅くなり得る。同じhelper binaryがremoteに残っていれば、別のremote-preview processからも再利用する。
 - Windows remote helperは未対応で、現在はplatform unsupportedとしてshell fallbackを試みる。
