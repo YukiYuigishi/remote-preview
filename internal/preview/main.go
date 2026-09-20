@@ -15,27 +15,39 @@ import (
 	"time"
 )
 
-func Run(args []string, program string) error {
-	configureLogging()
+type cliOptions struct {
+	flags    *flag.FlagSet
+	addr     *string
+	openPage *bool
+	verbose  *bool
+}
 
+func newCLIOptions(program string) *cliOptions {
 	flags := flag.NewFlagSet(program, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	addr := flags.String("addr", "127.0.0.1:8080", "listen address")
-	openPage := flags.Bool("open", false, "open the file browser in the default browser")
+	openPage := flags.Bool("open", true, "open the file browser in the default browser (use -open=false to disable)")
 	verbose := flags.Bool("v", false, "log each request")
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), "Usage: %s [options] host[:/remote/path]\n\n", filepath.Base(program))
 		flags.PrintDefaults()
 	}
-	if err := flags.Parse(args); err != nil {
+	return &cliOptions{flags: flags, addr: addr, openPage: openPage, verbose: verbose}
+}
+
+func Run(args []string, program string) error {
+	configureLogging()
+
+	options := newCLIOptions(program)
+	if err := options.flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 1 {
-		flags.Usage()
+	if options.flags.NArg() != 1 {
+		options.flags.Usage()
 		return errors.New("exactly one remote target is required")
 	}
 
-	target, err := parseTarget(flags.Arg(0))
+	target, err := parseTarget(options.flags.Arg(0))
 	if err != nil {
 		return err
 	}
@@ -57,13 +69,13 @@ func Run(args []string, program string) error {
 	}
 
 	remote := newCachedRemoteFS(backend, target.Host)
-	h := &handler{target: target, remote: remote, verbose: *verbose}
+	h := &handler{target: target, remote: remote, verbose: *options.verbose}
 	srv := &http.Server{
 		Handler:           h,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	listener, err := net.Listen("tcp", *addr)
+	listener, err := net.Listen("tcp", *options.addr)
 	if err != nil {
 		return err
 	}
@@ -73,7 +85,7 @@ func Run(args []string, program string) error {
 	previewURL := previewURLFor(listener.Addr())
 	writeStartupInfo(os.Stdout, target, previewURL)
 
-	if *openPage {
+	if *options.openPage {
 		go func() {
 			time.Sleep(200 * time.Millisecond)
 			if err := openBrowser(previewURL); err != nil {
