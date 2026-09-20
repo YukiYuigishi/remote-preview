@@ -200,3 +200,23 @@ func TestSSHRemoteFSHelperAssetsAreEmbedded(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoteHelperUploadScriptUsesTemporaryDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+	cmd := exec.Command("sh", "-c", remoteHelperUploadScript, "sh", "nonce")
+	cmd.Env = append(os.Environ(), "TMPDIR="+tempDir)
+	cmd.Stdin = strings.NewReader("helper-binary")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	helperPath := strings.TrimSpace(string(out))
+	defer os.Remove(helperPath)
+	content, err := os.ReadFile(helperPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "helper-binary" || !strings.HasPrefix(helperPath, tempDir+string(os.PathSeparator)) {
+		t.Fatalf("helper path/content = %q/%q", helperPath, content)
+	}
+}

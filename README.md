@@ -158,6 +158,8 @@ debug logは標準ライブラリの`log/slog`によるkey-value形式で、HTTP
 
 ブラウザから要求が来ると、ローカル側の `remote-preview` がsystem `ssh` を呼びます。directory listingはcache miss時にforegroundで取得し、対応platformでは一時配置したGo helperがcurrentと最大16個の直下directoryのlistingを1回で取得します。helperを利用できない場合はportable shell batchへ、さらに失敗した場合はsingle-directory listingへfallbackします。同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。background prefetchは行いません。ファイル内容はcacheしません。
 
+helperは最初のbatch listing時にremote platform判定とtemporary directoryへのuploadを行うため、ProxyJumpや高RTTの環境では最初の表示だけshell batchより遅くなる場合があります。helperはremote-previewのprocess中だけ利用し、終了時にcleanupを試みます。
+
 ```text
 Browser
    |

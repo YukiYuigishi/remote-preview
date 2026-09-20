@@ -226,8 +226,13 @@ func (s *sshRemoteFS) listBatchWithShell(ctx context.Context, remotePath string)
 }
 
 const remoteHelperUploadScript = `set -eu
-tmpdir=${TMPDIR:-/tmp}
-path="$tmpdir/.remote-preview-helper-$1"
+if command -v mktemp >/dev/null 2>&1; then
+  path=$(mktemp "${TMPDIR:-/tmp}/.remote-preview-helper.XXXXXXXX")
+else
+  tmpdir=${TMPDIR:-/tmp}
+  path="$tmpdir/.remote-preview-helper-$1"
+  : > "$path"
+fi
 umask 077
 cat > "$path"
 chmod 700 "$path"
