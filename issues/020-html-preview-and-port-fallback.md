@@ -67,3 +67,11 @@ HTMLファイルをRawリンク経由ではなく通常のファイルリンク�
 - `go test -race ./...`
 - `go vet ./...`
 - `go build ./...`
+
+## Verification results
+
+- 上記のHTML、port fallback unit testを追加・通過。
+- `go test ./...`: passed
+- `go test -race ./...`: passed
+- `go vet ./...`: passed
+- `go build ./...`: passed
