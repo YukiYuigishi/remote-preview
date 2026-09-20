@@ -146,6 +146,11 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, rel, remoteP
 		return
 	}
 
+	if isHTML(remotePath) {
+		serveRaw(w, r, remotePath, data)
+		return
+	}
+
 	if isTextFile(remotePath, data) {
 		h.serveText(w, r, rel, remotePath, data)
 		return

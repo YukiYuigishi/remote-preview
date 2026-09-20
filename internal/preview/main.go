@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"syscall"
 	"time"
 )
 
@@ -75,7 +77,7 @@ func Run(args []string, program string) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	listener, err := net.Listen("tcp", *options.addr)
+	listener, err := listenTCPWithPortFallback(*options.addr)
 	if err != nil {
 		return err
 	}
@@ -125,4 +127,32 @@ func previewURLFor(addr net.Addr) string {
 		host = "127.0.0.1"
 	}
 	return "http://" + net.JoinHostPort(host, fmt.Sprintf("%d", tcpAddr.Port)) + "/"
+}
+
+func listenTCPWithPortFallback(address string) (net.Listener, error) {
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil {
+		return net.Listen("tcp", address)
+	}
+
+	port, err := strconv.Atoi(portText)
+	if err != nil || port <= 0 || port > 65535 {
+		return net.Listen("tcp", address)
+	}
+
+	for candidatePort := port; candidatePort <= 65535; candidatePort++ {
+		candidate := net.JoinHostPort(host, strconv.Itoa(candidatePort))
+		listener, listenErr := net.Listen("tcp", candidate)
+		if listenErr == nil {
+			if candidatePort != port {
+				slog.Debug("listen port was occupied; shifted to next available port", "requested", address, "actual", candidate)
+			}
+			return listener, nil
+		}
+		if !errors.Is(listenErr, syscall.EADDRINUSE) || candidatePort == 65535 {
+			return nil, listenErr
+		}
+	}
+
+	return nil, fmt.Errorf("no available TCP port from %s", address)
 }

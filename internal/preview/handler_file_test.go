@@ -44,6 +44,38 @@ func TestHandlerSniffsUnknownUTF8TextFile(t *testing.T) {
 	}
 }
 
+func TestHandlerServesHTMLFileDirectly(t *testing.T) {
+	backend := newFakeRemoteFS()
+	backend.kinds["/root/index.html"] = "file"
+	backend.reads["/root/index.html"] = []byte("<!doctype html><title>remote page</title><script>window.loaded = true</script>")
+	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: backend}
+
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/index.html", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", response.Code)
+	}
+	if got := response.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Fatalf("content type=%q, want text/html; charset=utf-8", got)
+	}
+	if got := response.Body.String(); got != string(backend.reads["/root/index.html"]) {
+		t.Fatalf("HTML response=%q, want direct document", got)
+	}
+	if strings.Contains(response.Body.String(), "source-code") {
+		t.Fatal("HTML file was rendered by the text viewer")
+	}
+
+	rawResponse := httptest.NewRecorder()
+	h.ServeHTTP(rawResponse, httptest.NewRequest(http.MethodGet, "/index.html?raw=1", nil))
+	if rawResponse.Code != http.StatusOK || rawResponse.Header().Get("Content-Type") != "text/html; charset=utf-8" {
+		t.Fatalf("raw HTML response=%d content-type=%q", rawResponse.Code, rawResponse.Header().Get("Content-Type"))
+	}
+	if got := rawResponse.Body.String(); got != string(backend.reads["/root/index.html"]) {
+		t.Fatalf("raw HTML response=%q, want direct document", got)
+	}
+}
+
 func TestHandlerKeepsBinaryFileAsRaw(t *testing.T) {
 	backend := newFakeRemoteFS()
 	backend.kinds["/root/archive.bin"] = "file"
