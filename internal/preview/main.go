@@ -5,7 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +15,8 @@ import (
 )
 
 func Run(args []string, program string) error {
+	configureLogging()
+
 	flags := flag.NewFlagSet(program, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	addr := flags.String("addr", "127.0.0.1:8080", "listen address")
@@ -63,14 +65,13 @@ func Run(args []string, program string) error {
 	srv.Addr = listener.Addr().String()
 
 	previewURL := previewURLFor(listener.Addr())
-	log.Printf("browsing %s:%s", target.Host, target.Root)
-	log.Printf("open: %s", previewURL)
+	slog.Info("server ready", "host", target.Host, "root", target.Root, "url", previewURL)
 
 	if *openPage {
 		go func() {
 			time.Sleep(200 * time.Millisecond)
 			if err := openBrowser(previewURL); err != nil {
-				log.Printf("open browser: %v", err)
+				slog.Error("open browser", "error", err)
 			}
 		}()
 	}

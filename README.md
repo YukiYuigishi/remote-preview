@@ -137,6 +137,14 @@ request log:
 ./remote-preview -v remote-host:/remote/path/project
 ```
 
+debug log:
+
+```bash
+DEBUG=1 ./remote-preview -addr 127.0.0.1:7391 remote-host:/remote/path/project
+```
+
+debug logは標準ライブラリの`log/slog`によるkey-value形式で、HTTP request、cache hit/miss、batch listingのfallback、SSH commandの`operation`・`remote_path`・`duration`・`bytes`を出力します。`DEBUG`未設定時はdebug levelのログを出力しません。`-v`は通常のrequest logを有効にします。
+
 ## How it works
 
 ブラウザから要求が来ると、ローカル側の `remote-preview` がsystem `ssh` を呼びます。directory listingはcache miss時にforegroundで取得し、対応backendではcurrentと最大16個の直下directoryのlistingを1回のportable shell commandにまとめます。同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。batch commandが使えない場合はsingle-directory listingへfallbackします。background prefetchは行いません。ファイル内容はcacheしません。

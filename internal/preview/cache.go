@@ -2,6 +2,7 @@ package preview
 
 import (
 	"context"
+	"log/slog"
 	"path"
 	"sync"
 	"time"
@@ -80,14 +81,17 @@ func (c *listingCache) get(ctx context.Context, remotePath string, fetch func(co
 		if c.ttl > 0 && c.now().Before(entry.expiresAt) {
 			entries := cloneRemoteEntries(entry.entries)
 			c.mu.Unlock()
+			slog.Debug("listing cache hit", "host", c.host, "path", path.Clean(remotePath), "entries", len(entries))
 			return entries, nil
 		}
 		delete(c.entries, key)
 	}
 	if load, ok := c.loading[key]; ok {
 		c.mu.Unlock()
+		slog.Debug("listing cache wait", "host", c.host, "path", path.Clean(remotePath))
 		select {
 		case <-load.done:
+			slog.Debug("listing cache wait done", "host", c.host, "path", path.Clean(remotePath), "entries", len(load.entries), "error", load.err)
 			return cloneRemoteEntries(load.entries), load.err
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -98,6 +102,8 @@ func (c *listingCache) get(ctx context.Context, remotePath string, fetch func(co
 	c.loading[key] = load
 	c.mu.Unlock()
 
+	started := time.Now()
+	slog.Debug("listing cache miss", "host", c.host, "path", path.Clean(remotePath))
 	entries, err := fetch(ctx)
 	entries = cloneRemoteEntries(entries)
 
@@ -116,6 +122,7 @@ func (c *listingCache) get(ctx context.Context, remotePath string, fetch func(co
 	}
 	close(load.done)
 	c.mu.Unlock()
+	slog.Debug("listing cache fetch done", "host", c.host, "path", path.Clean(remotePath), "entries", len(entries), "duration", time.Since(started), "error", err)
 
 	return entries, err
 }
@@ -133,6 +140,7 @@ func (c *listingCache) store(remotePath string, entries []remoteEntry) {
 		sequence:  c.sequence,
 	}
 	c.evictIfNeeded()
+	slog.Debug("listing cache store", "host", c.host, "path", path.Clean(remotePath), "entries", len(entries))
 }
 
 func (c *listingCache) peek(remotePath string) ([]remoteEntry, bool) {
@@ -191,6 +199,7 @@ func (c *cachedRemoteFS) Kind(ctx context.Context, remotePath string) (string, e
 	if entries, ok := c.cache.peek(parent); ok {
 		for _, entry := range entries {
 			if entry.Name == base && (entry.Kind == "dir" || entry.Kind == "file") {
+				slog.Debug("listing cache kind hit", "host", c.cache.host, "path", remotePath, "kind", entry.Kind)
 				return entry.Kind, nil
 			}
 		}
@@ -199,8 +208,10 @@ func (c *cachedRemoteFS) Kind(ctx context.Context, remotePath string) (string, e
 		result, err := batch.ListBatch(ctx, remotePath)
 		if err == nil {
 			c.storeBatch(remotePath, result)
+			slog.Debug("batch kind resolved", "path", remotePath, "kind", result.RootKind, "directories", len(result.Listings))
 			return result.RootKind, nil
 		}
+		slog.Debug("batch kind fallback", "path", remotePath, "error", err)
 	}
 	return c.backend.Kind(ctx, remotePath)
 }
@@ -213,8 +224,12 @@ func (c *cachedRemoteFS) List(ctx context.Context, remotePath string) ([]remoteE
 			if err == nil {
 				current, foundCurrent := c.storeBatch(remotePath, result)
 				if foundCurrent {
+					slog.Debug("batch listing applied", "path", remotePath, "directories", len(result.Listings), "root_kind", result.RootKind)
 					return current, nil
 				}
+				slog.Debug("batch listing missing current path", "path", remotePath, "directories", len(result.Listings))
+			} else {
+				slog.Debug("batch listing fallback", "path", remotePath, "error", err)
 			}
 		}
 		return c.backend.List(fetchCtx, remotePath)
@@ -232,6 +247,7 @@ func (c *cachedRemoteFS) storeBatch(remotePath string, result batchListingResult
 			foundCurrent = true
 		}
 	}
+	slog.Debug("batch listings cached", "path", remotePath, "directories", len(result.Listings), "root_kind", result.RootKind)
 	return current, foundCurrent
 }
 

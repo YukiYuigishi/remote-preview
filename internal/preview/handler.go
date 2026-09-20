@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"log"
+	"log/slog"
 	"mime"
 	"net/http"
 	"path"
 	"strings"
+	"time"
 )
 
 type handler struct {
@@ -18,17 +19,23 @@ type handler struct {
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
+	defer func() {
+		slog.Debug("http request done", "method", r.Method, "uri", r.URL.RequestURI(), "duration", time.Since(started))
+	}()
+
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	if h.verbose {
-		log.Printf("%s %s", r.Method, r.URL.RequestURI())
+		slog.Info("http request", "method", r.Method, "uri", r.URL.RequestURI())
 	}
 
 	rel := cleanRelativeURLPath(r.URL.Path)
 	remotePath := path.Join(h.target.Root, rel)
+	slog.Debug("http request start", "method", r.Method, "uri", r.URL.RequestURI(), "remote_path", remotePath)
 
 	kind, err := h.remote.Kind(r.Context(), remotePath)
 	if err != nil {
@@ -56,6 +63,7 @@ func (h *handler) serveDirectory(w http.ResponseWriter, r *http.Request, rel, re
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
+	slog.Debug("directory listing ready", "remote_path", remotePath, "entries", len(entries))
 
 	if r.Method == http.MethodHead {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -113,7 +121,7 @@ func (h *handler) serveDirectory(w http.ResponseWriter, r *http.Request, rel, re
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := directoryTemplate.Execute(w, data); err != nil {
-		log.Printf("render directory: %v", err)
+		slog.Error("render directory", "error", err)
 	}
 }
 
@@ -169,7 +177,7 @@ func (h *handler) serveMarkdown(w http.ResponseWriter, r *http.Request, rel, rem
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := markdownTemplate.Execute(w, data); err != nil {
-		log.Printf("render markdown: %v", err)
+		slog.Error("render markdown", "error", err)
 	}
 }
 
@@ -199,7 +207,7 @@ func (h *handler) serveText(w http.ResponseWriter, r *http.Request, rel, remoteP
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := textTemplate.Execute(w, data); err != nil {
-		log.Printf("render text: %v", err)
+		slog.Error("render text", "error", err)
 	}
 }
 

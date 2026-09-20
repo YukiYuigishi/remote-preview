@@ -8,6 +8,7 @@
 - 次の主要課題は、ファイル全量読み込みとpreview fallback/HTTP品質（Phase 5）。
 - `cmd/remote-preview`は薄いentrypointで、アプリケーション実装は`internal/preview`に配置されている。
 - directory listingはforegroundで取得し、必要に応じてportable batch commandで直下分も同じSSHにまとめ、TTL cacheとsingleflightで再利用する。
+- debug logは標準ライブラリの`log/slog`でHTTP、cache、batch、SSHの処理境界を追跡できる。
 
 ## Product decisions
 

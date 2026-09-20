@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"path"
 	"sort"
@@ -58,7 +59,7 @@ func newSSHRemoteFS(host string) *sshRemoteFS {
 
 func (s *sshRemoteFS) Home(ctx context.Context) (string, error) {
 	script := `printf '%s' "$HOME"`
-	out, err := s.run(ctx, "sh", "-c", script, "sh")
+	out, err := s.runNamed(ctx, "home", "", "sh", "-c", script, "sh")
 	if err != nil {
 		return "", err
 	}
@@ -71,7 +72,7 @@ func (s *sshRemoteFS) Home(ctx context.Context) (string, error) {
 
 func (s *sshRemoteFS) Kind(ctx context.Context, remotePath string) (string, error) {
 	script := `p=$1; if [ -d "$p" ]; then printf dir; elif [ -f "$p" ]; then printf file; else printf missing; fi`
-	out, err := s.run(ctx, "sh", "-c", script, "sh", remotePath)
+	out, err := s.runNamed(ctx, "kind", remotePath, "sh", "-c", script, "sh", remotePath)
 	if err != nil {
 		return "", err
 	}
@@ -80,7 +81,7 @@ func (s *sshRemoteFS) Kind(ctx context.Context, remotePath string) (string, erro
 
 func (s *sshRemoteFS) Read(ctx context.Context, remotePath string) ([]byte, error) {
 	script := `p=$1; exec cat -- "$p"`
-	return s.run(ctx, "sh", "-c", script, "sh", remotePath)
+	return s.runNamed(ctx, "read", remotePath, "sh", "-c", script, "sh", remotePath)
 }
 
 func (s *sshRemoteFS) List(ctx context.Context, remotePath string) ([]remoteEntry, error) {
@@ -102,7 +103,7 @@ for f in "$p"/* "$p"/.[!.]* "$p"/..?*; do
   printf '%s\t%s\n' "$t" "$n"
 done
 `
-	out, err := s.run(ctx, "sh", "-c", script, "sh", remotePath)
+	out, err := s.runNamed(ctx, "list", remotePath, "sh", "-c", script, "sh", remotePath)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +180,7 @@ done
 `
 
 func (s *sshRemoteFS) ListBatch(ctx context.Context, remotePath string) (batchListingResult, error) {
-	out, err := s.run(ctx, "sh", "-c", batchListingScript, "sh", remotePath, strconv.Itoa(batchMaxDirectories))
+	out, err := s.runNamed(ctx, "list_batch", remotePath, "sh", "-c", batchListingScript, "sh", remotePath, strconv.Itoa(batchMaxDirectories))
 	if err != nil {
 		return batchListingResult{}, err
 	}
@@ -252,6 +253,11 @@ func sortRemoteEntries(entries []remoteEntry) {
 }
 
 func (s *sshRemoteFS) run(ctx context.Context, args ...string) ([]byte, error) {
+	return s.runNamed(ctx, "command", "", args...)
+}
+
+func (s *sshRemoteFS) runNamed(ctx context.Context, operation, remotePath string, args ...string) ([]byte, error) {
+	started := time.Now()
 	commandTimeout := s.commandTimeout
 	if commandTimeout <= 0 {
 		commandTimeout = 30 * time.Second
@@ -263,6 +269,7 @@ func (s *sshRemoteFS) run(ctx context.Context, args ...string) ([]byte, error) {
 
 	runCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
+	slog.Debug("ssh command start", "host", s.host, "operation", operation, "remote_path", remotePath, "timeout", commandTimeout)
 
 	sshArgs := []string{
 		"-T",
@@ -282,14 +289,19 @@ func (s *sshRemoteFS) run(ctx context.Context, args ...string) ([]byte, error) {
 	out, err := cmd.Output()
 	if err != nil {
 		if runCtx.Err() != nil {
-			return nil, fmt.Errorf("ssh %s: %w", s.host, runCtx.Err())
+			wrapped := fmt.Errorf("ssh %s: %w", s.host, runCtx.Err())
+			slog.Debug("ssh command done", "host", s.host, "operation", operation, "remote_path", remotePath, "duration", time.Since(started), "bytes", len(out), "error", wrapped)
+			return nil, wrapped
 		}
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()
 		}
-		return nil, fmt.Errorf("ssh %s: %s", s.host, msg)
+		wrapped := fmt.Errorf("ssh %s: %s", s.host, msg)
+		slog.Debug("ssh command done", "host", s.host, "operation", operation, "remote_path", remotePath, "duration", time.Since(started), "bytes", len(out), "error", wrapped)
+		return nil, wrapped
 	}
+	slog.Debug("ssh command done", "host", s.host, "operation", operation, "remote_path", remotePath, "duration", time.Since(started), "bytes", len(out))
 	return out, nil
 }
 
