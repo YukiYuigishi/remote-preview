@@ -38,7 +38,7 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
 
 ```bash
 make build
-./bin/remote-preview -open remote-host:/remote/path
+./bin/remote-preview remote-host:/remote/path
 ```
 
 ブラウザで:
@@ -50,7 +50,7 @@ http://127.0.0.1:8080/
 ## Example
 
 ```bash
-./remote-preview-darwin-arm64 -open remote-user@remote.example.com:/remote/path
+./remote-preview-darwin-arm64 remote-user@remote.example.com:/remote/path
 ```
 
 普段 `~/.ssh/config` にaliasを書いているなら、そのaliasをそのまま使えます。
@@ -67,7 +67,7 @@ Host bastion
 ```
 
 ```bash
-./remote-preview-darwin-arm64 -open remote-host:/remote/path
+./remote-preview-darwin-arm64 remote-host:/remote/path
 ```
 
 ## Markdown / Mermaid
@@ -98,7 +98,7 @@ Go 1.23+のみ必要です。Go module dependencyはありません。通常のb
 
 ```bash
 make build
-./bin/remote-preview -open remote-host:/remote/path
+./bin/remote-preview remote-host:/remote/path
 ```
 
 remote-side helperの埋め込みartifactはLinux/darwinのamd64/arm64向けに同梱しています。artifactを再生成する場合は次を実行します。
@@ -137,13 +137,13 @@ make clean      # bin/のMakefile生成物を削除
 リモートhomeを開く場合はhostだけを指定できます。
 
 ```bash
-./bin/remote-preview -open remote-host
+./bin/remote-preview remote-host
 ```
 
-ブラウザを自動で開く:
+ブラウザはデフォルトで自動的に開きます。自動起動を無効にする場合:
 
 ```bash
-./bin/remote-preview -open remote-host:/remote/path
+./bin/remote-preview -open=false remote-host:/remote/path
 ```
 
 listen address変更:

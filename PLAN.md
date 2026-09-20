@@ -17,7 +17,7 @@
 - 対象ユーザーは、対象ホストへSSH接続できる本人。read-only用途を維持する。
 - `host:/absolute/path` は継続サポートする。
 - `host` だけを指定した場合は、リモートのホームディレクトリを対象にする。
-- `-open` は後方互換のため残す。local listen address (`-addr`) と remote target は別概念として扱う。
+- ブラウザは起動時にデフォルトで開く。自動起動を無効にする場合は`-open=false`を指定する。local listen address (`-addr`) と remote target は別概念として扱う。
 - `~` や相対パスをローカル側で推測せず、リモート側でホームを解決する。
 - シンボリックリンクによるroot外参照は、個人向けread-onlyツールとしては最優先の阻害要因にしない。ただし挙動を明文化し、将来strict root confinementを追加できる構造にする。
 - system `ssh` は `~/.ssh/config`、Host alias、ProxyJump、ssh-agent、ControlMasterを利用できる強みがあるため、Go SSHへ即時置換しない。

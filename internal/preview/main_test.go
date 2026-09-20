@@ -24,6 +24,24 @@ func TestWriteStartupInfoUsesPlainURLOutput(t *testing.T) {
 	}
 }
 
+func TestCLIOptionsOpenByDefault(t *testing.T) {
+	options := newCLIOptions("remote-preview")
+	if err := options.flags.Parse(nil); err != nil {
+		t.Fatal(err)
+	}
+	if !*options.openPage {
+		t.Fatal("expected browser opening to be enabled by default")
+	}
+
+	options = newCLIOptions("remote-preview")
+	if err := options.flags.Parse([]string{"-open=false"}); err != nil {
+		t.Fatal(err)
+	}
+	if *options.openPage {
+		t.Fatal("expected -open=false to disable browser opening")
+	}
+}
+
 func TestParseTarget(t *testing.T) {
 	got, err := parseTarget("remote-host:/remote/path")
 	if err != nil {
