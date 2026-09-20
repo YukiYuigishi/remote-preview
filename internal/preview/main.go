@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -70,7 +71,7 @@ func Run(args []string, program string) error {
 	srv.Addr = listener.Addr().String()
 
 	previewURL := previewURLFor(listener.Addr())
-	slog.Info("server ready", "host", target.Host, "root", target.Root, "url", previewURL)
+	writeStartupInfo(os.Stdout, target, previewURL)
 
 	if *openPage {
 		go func() {
@@ -94,6 +95,11 @@ func Run(args []string, program string) error {
 		return err
 	}
 	return nil
+}
+
+func writeStartupInfo(w io.Writer, target remoteTarget, previewURL string) {
+	fmt.Fprintf(w, "browsing %s:%s\n", target.Host, target.Root)
+	fmt.Fprintf(w, "open: %s\n", previewURL)
 }
 
 func previewURLFor(addr net.Addr) string {

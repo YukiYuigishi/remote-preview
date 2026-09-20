@@ -152,7 +152,7 @@ listen address変更:
 ./bin/remote-preview -addr 127.0.0.1:7391 remote-host:/remote/path
 ```
 
-空いているportを使う場合は`-addr :0`を指定できます。実際にlistenしたURLがログに表示されます。
+空いているportを使う場合は`-addr :0`を指定できます。実際にlistenしたURLが`open: http://.../`形式の通常出力として表示されます。diagnostic logはstderrへ出力されます。
 
 request log:
 
