@@ -34,6 +34,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.verbose {
 		slog.Info("http request", "method", r.Method, "uri", r.URL.RequestURI())
 	}
+	if servePreviewAsset(w, r) {
+		return
+	}
 
 	rel := cleanRelativeURLPath(r.URL.Path)
 	remotePath := path.Join(h.target.Root, rel)

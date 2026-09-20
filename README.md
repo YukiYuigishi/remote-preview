@@ -28,7 +28,7 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
 - ` ```mermaid ` fenced code blockをMermaidとして描画
 - PNG/JPEG/WebP/SVGなど: そのまま表示
 - source code / JSON / YAML / textなど: browser内text viewer
-- 対応するsource codeはhighlight.jsでsyntax highlight（CDN利用可能時）
+- 対応するsource codeは同梱のhighlight.jsでsyntax highlight
 - `Raw` 表示
 - directory listingのTTL cacheと同時アクセスの重複抑制
 - macOS / BusyBox互換のforeground batch listing
@@ -100,7 +100,7 @@ flowchart LR
 ```
 ````
 
-Markdown renderer / Mermaid / syntax highlightは現在jsDelivrからbrowser側で読み込むため、rich previewとhighlightにはインターネット接続が必要です。CDNを読めない場合でもMarkdown sourceとtext sourceは表示されます。
+Markdown renderer / Mermaid / syntax highlightのbrowser assetはremote-preview binaryへ同梱し、localhostから配信します。そのため、通常のpreview表示に外部インターネット接続は必要ありません。assetの読み込みやrich renderingに失敗した場合でもMarkdown sourceとtext sourceへfallbackします。assetのversionとlicenseは`THIRD_PARTY_NOTICES.md`に記録しています。
 
 ## Build
 
@@ -134,9 +134,12 @@ make clean      # bin/のMakefile生成物を削除
 - `cmd/remote-preview`: CLI entrypoint only
 - `cmd/remote-preview-helper`: remote-side filesystem helper entrypoint
 - `internal/preview`: target parsing、SSH transport、directory cache、HTTP handler、templateとそのtests
+- `internal/preview/assets.go`: 同梱browser assetのembedとlocalhost配信
+- `internal/preview/assets`: marked、Mermaid、highlight.js/CSSのversion固定asset
 - `internal/remotehelper`: helperのfilesystem traversalとbatch protocol writer
 - `scripts/generate-remote-helpers.sh`: helper artifactのcross buildと圧縮
 - `Makefile`: build、test、verification command
+- `THIRD_PARTY_NOTICES.md`: 同梱browser assetのversionとlicense
 - `issues/`: 実装scopeと検証結果
 
 ## Usage
@@ -211,7 +214,7 @@ Remote filesystem
 - Range request未対応
 - live reload未対応
 - file edit / upload / rename / deleteは未対応
-- Markdown / Mermaidのrich renderingはCDN依存
+- Markdown / Mermaid / syntax highlightのbrowser assetを同梱するため、binary sizeが増える
 - SSH URI形式やIPv6 literalのtarget parserは未対応
 - Windows remote helperは未対応で、現状はshell fallbackを試みる
 - helper cacheがない場合はplatform判定とbinary uploadが発生するため、高RTTやProxyJump環境では初回表示が遅くなる場合がある。cache hit時はbinary uploadを行わない

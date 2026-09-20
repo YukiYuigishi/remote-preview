@@ -11,7 +11,8 @@
 - debug logは標準ライブラリの`log/slog`でHTTP、cache、batch、SSHの処理境界を追跡できる。
 - remote-side Go helperはIssue 010/015で実装済み。remote `TMPDIR`のversion/hash付きcacheを再利用し、既存shell batchをfallbackとして維持する。
 - helper cache miss時のbinary uploadはSSH compressionを使い、失敗時はraw uploadへfallbackする。
-- text-like fileはbrowser内viewerへ送り、対応source codeはbrowser-side syntax highlightを利用する。CDN unavailable時はplain textへfallbackする。
+- text-like fileはbrowser内viewerへ送り、対応source codeは同梱したbrowser-side highlight.jsでsyntax highlightを利用する。assetやrich renderingに失敗した場合はplain text/sourceへfallbackする。
+- Markdown、Mermaid、highlight.jsのbrowser assetはversion固定でbinaryへembedし、localhostから配信する。runtime CDN依存はない。
 - MakefileはIssue 011でbuild、helper生成、test、race、vet、check、cleanを再現する。
 
 ## Product decisions
