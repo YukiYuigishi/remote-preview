@@ -38,5 +38,5 @@ directory listingだけをTTL付きでcacheし、同時アクセスの重複SSH�
 
 ## Current state / blocker
 
-- 完了。TTL/max entries/singleflight相当、親と直下directoryの非同期prefetch、cached kind lookupを実装済み。
-- `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...`で検証済み。
+- 初期実装は完了したが、interactive latencyとの競合が確認されたため、prefetch部分はIssue 007で削除した。
+- TTL/max entries/singleflight相当とcached kind lookupは維持している。

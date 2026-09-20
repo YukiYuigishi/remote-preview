@@ -27,7 +27,7 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
 - PNG/JPEG/WebP/SVGなど: そのまま表示
 - source code / JSON / YAML / textなど: text viewer
 - `Raw` 表示
-- directory listingのTTL cacheと親/直下directoryのbackground prefetch
+- directory listingのTTL cacheと同時アクセスの重複抑制
 - SSH command/connect timeoutとrequest context cancellation
 - read-only
 
@@ -137,7 +137,7 @@ request log:
 
 ## How it works
 
-ブラウザから要求が来ると、ローカル側の `remote-preview` がsystem `ssh` を呼びます。directory listingは短いTTLでcacheし、同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。アイドル時には親と少数の直下directoryをprefetchしますが、ユーザー操作が始まるとprefetchを停止してforegroundのremote accessを優先します。ファイル内容はcacheしません。
+ブラウザから要求が来ると、ローカル側の `remote-preview` がsystem `ssh` を呼びます。directory listingは必要になったdirectoryだけを取得し、短いTTLでcacheします。同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。ファイル内容はcacheしません。
 
 ```text
 Browser

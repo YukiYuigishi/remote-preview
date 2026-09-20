@@ -3,11 +3,11 @@
 ## Current state
 
 - MVPのread-only SSHファイルプレビューは動作している。
-- Phase 1–4（責務分割、target改善、context-aware system SSH、directory listing cache/prefetch）を実装済み。
+- Phase 1–4（責務分割、target改善、context-aware system SSH、on-demand directory listing cache）を実装済み。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...` は成功している。
 - 次の主要課題は、ファイル全量読み込みとpreview fallback/HTTP品質（Phase 5）。
 - `cmd/remote-preview`は薄いentrypointで、アプリケーション実装は`internal/preview`に配置されている。
-- foregroundのremote accessはbackground prefetchより優先され、prefetchは操作時に停止する。
+- directory listingはon-demandで取得し、TTL cacheとsingleflightで再表示・同時アクセスを効率化する。
 
 ## Product decisions
 
@@ -28,7 +28,7 @@
 - `main.go`: flag、server起動、signal/shutdown
 - `target.go`: target parser、home targetの表現、URL/path helper
 - `remote.go`: remote filesystem interfaceとtransport実装
-- `cache.go`: directory listing cache、TTL、prefetch
+- `cache.go`: directory listing cache、TTL、singleflight
 - `handler.go`: HTTP routingとresponse生成
 - `templates.go`: HTML/CSS/Markdown template
 
@@ -80,24 +80,22 @@ Acceptance criteria:
 - system `ssh` backendをfake backendに差し替えてテストできる。
 - Go SSH prototypeが既存機能を満たせない場合は、system `ssh` 継続を正式判断として記録する。
 
-### Phase 4: directory listing cacheとprefetch
+### Phase 4: directory listing cache
 
 対象はまずdirectory listingだけとし、ファイル内容のキャッシュは行わない。
 
 - cache keyはremote hostと正規化済みremote path。
 - TTLと最大エントリ数を設ける。
 - 同一pathへの同時アクセスはsingleflight相当で重複SSHを抑える。
-- 初回表示では、現在のdirectoryの一覧を優先して返す。
-- バックグラウンドで、現在のdirectoryの親と、直下のdirectoryをprefetchする。
-- 直下directoryが多い場合は件数・同時実行数を制限し、初回レスポンスを遅くしない。
+- 初回表示では、現在のdirectoryの一覧だけを取得する。
+- 子directoryは先読みせず、ユーザーが移動した時にon-demandで取得する。
 - read-only前提でも、TTL満了後は再取得できるようにする。
 - cached listingのentry kindを使い、一覧から辿ったdirectory/fileでは不要な`remoteKind`呼び出しを減らす。
 
 Acceptance criteria:
 
 - 同じdirectoryの再表示でSSH listingが発生しない。
-- 初回directoryの表示時間が、prefetch待ちで悪化しない。
-- 親と直下directoryのキャッシュがバックグラウンドで温まる。
+- directory移動時に不要なbackground SSHが発生しない。
 - TTL切れ、同時アクセス、SSH失敗時の挙動がテストされている。
 
 ### Phase 5: preview fallbackとHTTPの品質改善
@@ -123,7 +121,7 @@ Acceptance criteria:
 
 ## Verification
 
-- Unit: target parser、URL segment、parent/breadcrumb、cache TTL、prefetch scheduling、fallback。
+- Unit: target parser、URL segment、parent/breadcrumb、cache TTL、singleflight、fallback。
 - Handler: fake `RemoteFS` によるGET/HEAD、directory/file/Markdown/error response。
 - Integration: fake SSH executableまたはtest transportによる引数・context・stderr処理。
 - Regression: `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...`。
@@ -136,7 +134,7 @@ Acceptance criteria:
 1. 責務分割とRemoteFS interface
 2. target `host` shorthand / remote home / URL encoding
 3. context-aware system SSH backend
-4. directory listing cache / prefetch
+4. directory listing cache
 5. Markdown fallbackとHTTP read path
 6. Go SSH prototypeとtransport選択
 7. root confinement policyとドキュメント

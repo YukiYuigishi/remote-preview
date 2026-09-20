@@ -114,6 +114,25 @@ func TestCachedRemoteFSReusesListingAndEntryKind(t *testing.T) {
 	}
 }
 
+func TestCachedRemoteFSListsOnlyRequestedDirectory(t *testing.T) {
+	backend := newFakeRemoteFS()
+	backend.lists["/root"] = []remoteEntry{{Name: "workspace", Kind: "dir"}}
+	cached := newCachedRemoteFSWithOptions(backend, "remote-host", listingCacheOptions{
+		TTL:        time.Minute,
+		MaxEntries: 10,
+	})
+
+	if _, err := cached.List(context.Background(), "/root"); err != nil {
+		t.Fatal(err)
+	}
+	if got := backend.calls("/root"); got != 1 {
+		t.Fatalf("root listing calls=%d, want 1", got)
+	}
+	if got := backend.calls("/root/workspace"); got != 0 {
+		t.Fatalf("workspace listing calls=%d, want 0 before navigation", got)
+	}
+}
+
 func TestListingCacheExpires(t *testing.T) {
 	backend := newFakeRemoteFS()
 	backend.lists["/root"] = []remoteEntry{{Name: "a", Kind: "file"}}
@@ -206,141 +225,6 @@ func TestListingCacheDoesNotCacheErrors(t *testing.T) {
 	}
 }
 
-func TestCachedRemoteFSPrefetchesParentAndChildDirectories(t *testing.T) {
-	backend := newFakeRemoteFS()
-	backend.lists["/root"] = []remoteEntry{{Name: "child", Kind: "dir"}, {Name: "file.txt", Kind: "file"}}
-	backend.lists["/"] = nil
-	backend.lists["/root/child"] = nil
-
-	release := make(chan struct{})
-	backend.listBlock["/"] = release
-	backend.listBlock["/root/child"] = release
-	options := listingCacheOptions{
-		TTL:                    time.Minute,
-		MaxEntries:             10,
-		PrefetchMaxDirectories: 4,
-		PrefetchConcurrency:    2,
-		PrefetchTimeout:        time.Second,
-	}
-	cached := newCachedRemoteFSWithOptions(backend, "remote-host", options)
-
-	start := time.Now()
-	if _, err := cached.List(context.Background(), "/root"); err != nil {
-		t.Fatal(err)
-	}
-	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
-		t.Fatalf("initial listing waited for prefetch: %s", elapsed)
-	}
-
-	deadline := time.Now().Add(time.Second)
-	for (backend.calls("/") == 0 || backend.calls("/root/child") == 0) && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if backend.calls("/") == 0 || backend.calls("/root/child") == 0 {
-		t.Fatalf("prefetch calls: parent=%d child=%d", backend.calls("/"), backend.calls("/root/child"))
-	}
-	close(release)
-
-	deadline = time.Now().Add(time.Second)
-	for (!hasCachedListing(cached.cache, "/") || !hasCachedListing(cached.cache, "/root/child")) && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if !hasCachedListing(cached.cache, "/") || !hasCachedListing(cached.cache, "/root/child") {
-		t.Fatal("prefetched listings were not cached")
-	}
-}
-
-type priorityRemoteFS struct {
-	mu sync.Mutex
-
-	workspaceStarted chan struct{}
-	workspaceFirst   bool
-	calls            map[string]int
-}
-
-func newPriorityRemoteFS() *priorityRemoteFS {
-	return &priorityRemoteFS{
-		workspaceStarted: make(chan struct{}),
-		workspaceFirst:   true,
-		calls:            make(map[string]int),
-	}
-}
-
-func (f *priorityRemoteFS) Home(context.Context) (string, error) {
-	return "/home/test", nil
-}
-
-func (f *priorityRemoteFS) Kind(context.Context, string) (string, error) {
-	return "dir", nil
-}
-
-func (f *priorityRemoteFS) Read(context.Context, string) ([]byte, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (f *priorityRemoteFS) List(ctx context.Context, remotePath string) ([]remoteEntry, error) {
-	f.mu.Lock()
-	f.calls[remotePath]++
-	blockWorkspace := remotePath == "/root/workspace" && f.workspaceFirst
-	if blockWorkspace {
-		f.workspaceFirst = false
-		close(f.workspaceStarted)
-	}
-	f.mu.Unlock()
-
-	if blockWorkspace {
-		<-ctx.Done()
-		return nil, ctx.Err()
-	}
-	if remotePath == "/root" {
-		return []remoteEntry{{Name: "workspace", Kind: "dir"}}, nil
-	}
-	return nil, nil
-}
-
-func (f *priorityRemoteFS) callCount(remotePath string) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.calls[remotePath]
-}
-
-func TestCachedRemoteFSPrioritizesUserListingOverPrefetch(t *testing.T) {
-	backend := newPriorityRemoteFS()
-	cached := newCachedRemoteFSWithOptions(backend, "remote-host", listingCacheOptions{
-		TTL:                    time.Minute,
-		MaxEntries:             10,
-		PrefetchMaxDirectories: 1,
-		PrefetchConcurrency:    1,
-		PrefetchTimeout:        time.Minute,
-	})
-	defer cached.prefetches.cancelAll()
-
-	if _, err := cached.List(context.Background(), "/root"); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-backend.workspaceStarted:
-	case <-time.After(time.Second):
-		t.Fatal("workspace prefetch did not start")
-	}
-
-	start := time.Now()
-	if _, err := cached.List(context.Background(), "/root/workspace"); err != nil {
-		t.Fatal(err)
-	}
-	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
-		t.Fatalf("user listing waited for prefetch: %s", elapsed)
-	}
-	if got := backend.callCount("/root/workspace"); got != 2 {
-		t.Fatalf("workspace listing calls=%d, want canceled prefetch plus user listing", got)
-	}
-}
-
-func hasCachedListing(cache *listingCache, remotePath string) bool {
-	_, ok := cache.peek(remotePath)
-	return ok
-}
-
 func TestCachedRemoteFSUsesHostInCacheKey(t *testing.T) {
 	backend := newFakeRemoteFS()
 	backend.lists["/root"] = []remoteEntry{{Name: "a", Kind: "file"}}
@@ -361,7 +245,7 @@ func TestListingCacheEvictsOldEntries(t *testing.T) {
 	backend := newFakeRemoteFS()
 	backend.lists["/one"] = []remoteEntry{}
 	backend.lists["/two"] = []remoteEntry{}
-	options := listingCacheOptions{TTL: time.Minute, MaxEntries: 1, PrefetchMaxDirectories: 0}
+	options := listingCacheOptions{TTL: time.Minute, MaxEntries: 1}
 	cached := newCachedRemoteFSWithOptions(backend, "remote-host", options)
 	for _, remotePath := range []string{"/one", "/two", "/one"} {
 		if _, err := cached.List(context.Background(), remotePath); err != nil {
@@ -377,9 +261,8 @@ func Example_cachedRemoteFS() {
 	backend := newFakeRemoteFS()
 	backend.lists["/root"] = []remoteEntry{{Name: "notes", Kind: "dir"}}
 	cached := newCachedRemoteFSWithOptions(backend, "remote-host", listingCacheOptions{
-		TTL:                    time.Minute,
-		MaxEntries:             10,
-		PrefetchMaxDirectories: 0,
+		TTL:        time.Minute,
+		MaxEntries: 10,
 	})
 	entries, _ := cached.List(context.Background(), "/root")
 	fmt.Println(entries[0].Name)

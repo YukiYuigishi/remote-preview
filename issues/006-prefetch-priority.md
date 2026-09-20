@@ -36,6 +36,4 @@ directory prefetchがユーザーのdirectory移動と競合して、移動先�
 
 ## Current state / blocker
 
-- 完了。foregroundの`Kind`/`List`/`Read`要求でprefetchを停止し、キャンセル済みprefetchの結果をユーザー要求へ返さず再取得するようにした。
-- 既定prefetchを最大4 directory、同時実行1本に抑制した。
-- `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...`で検証済み。
+- 実装後、prefetch自体を維持するよりon-demand listingへ戻す方針に変更したため、Issue 007で置き換えた。

@@ -14,9 +14,8 @@ func TestHandlerUsesCachedDirectoryListingAndEntryKind(t *testing.T) {
 	backend.kinds["/root/docs"] = "dir"
 	backend.lists["/root/docs"] = []remoteEntry{{Name: "readme.md", Kind: "file"}}
 	cached := newCachedRemoteFSWithOptions(backend, "remote-host", listingCacheOptions{
-		TTL:                    time.Minute,
-		MaxEntries:             10,
-		PrefetchMaxDirectories: 0,
+		TTL:        time.Minute,
+		MaxEntries: 10,
 	})
 	h := &handler{
 		target: remoteTarget{Host: "remote-host", Root: "/root"},
