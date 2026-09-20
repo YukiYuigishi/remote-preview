@@ -1,8 +1,8 @@
-# remote-preview MVP
+# remote-preview
 
 SSH先のディレクトリを、ローカルブラウザから **read-only Webファイラー** として閲覧する小さなCLIです。
 
-リモート側にHTTPサーバや専用agentを入れず、system `ssh` だけを使います。
+リモート側にHTTPサーバや恒久的なagentを入れず、system `ssh` で必要な処理だけを実行します。directory batch listingでは、対応platform向けのGo helperを一時配置して使います。
 
 ## Features
 
@@ -16,7 +16,8 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
   - ssh-agent
   - ControlMaster
   などをそのまま利用
-- リモートのPOSIX `sh`（macOS / BusyBoxを含む）でcurrentと直下directoryをbatch listing
+- remote-side Go helper（Linux/darwinのamd64/arm64）でcurrentと直下directoryをbatch listing
+- helperが使えない場合はPOSIX `sh`（macOS / BusyBoxを含む）のbatch listingへfallback
 - ディレクトリ一覧とbreadcrumb navigation
 - HTML: そのままブラウザでpreview
 - Markdown: GitHub Flavored Markdown (GFM) preview
@@ -30,15 +31,14 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
 - `Raw` 表示
 - directory listingのTTL cacheと同時アクセスの重複抑制
 - macOS / BusyBox互換のforeground batch listing
-- remote-side Go helperによるforeground batch listing（利用できない場合はshellへfallback）
 - SSH command/connect timeoutとrequest context cancellation
 - read-only
 
 ## Quick start (macOS Apple Silicon)
 
 ```bash
-chmod +x remote-preview-darwin-arm64
-./remote-preview-darwin-arm64 -open remote-host:/remote/path
+make build
+./bin/remote-preview -open remote-host:/remote/path
 ```
 
 ブラウザで:
@@ -98,13 +98,13 @@ Go 1.23+のみ必要です。Go module dependencyはありません。通常のb
 
 ```bash
 make build
-./bin/remote-preview
+./bin/remote-preview -open remote-host:/remote/path
 ```
 
 remote-side helperの埋め込みartifactはLinux/darwinのamd64/arm64向けに同梱しています。artifactを再生成する場合は次を実行します。
 
 ```bash
-go generate ./internal/preview
+make generate
 ```
 
 主なdevelopment command:
@@ -113,6 +113,7 @@ go generate ./internal/preview
 make test       # go test ./...
 make test-race  # go test -race ./...
 make vet        # go vet ./...
+make build-helper # standalone remote-preview-helperをbin/へbuild
 make check      # generate + test + race + vet + build
 make clean      # bin/のMakefile生成物を削除
 ```
@@ -123,30 +124,32 @@ make clean      # bin/のMakefile生成物を削除
 - `cmd/remote-preview-helper`: remote-side filesystem helper entrypoint
 - `internal/preview`: target parsing、SSH transport、directory cache、HTTP handler、templateとそのtests
 - `internal/remotehelper`: helperのfilesystem traversalとbatch protocol writer
+- `scripts/generate-remote-helpers.sh`: helper artifactのcross buildと圧縮
+- `Makefile`: build、test、verification command
 - `issues/`: 実装scopeと検証結果
 
 ## Usage
 
 ```bash
-./remote-preview [options] host:/absolute/path
+./bin/remote-preview [options] host:/absolute/path
 ```
 
 リモートhomeを開く場合はhostだけを指定できます。
 
 ```bash
-./remote-preview -open remote-host
+./bin/remote-preview -open remote-host
 ```
 
 ブラウザを自動で開く:
 
 ```bash
-./remote-preview -open remote-host:/remote/path
+./bin/remote-preview -open remote-host:/remote/path
 ```
 
 listen address変更:
 
 ```bash
-./remote-preview -addr 127.0.0.1:7391 remote-host:/remote/path
+./bin/remote-preview -addr 127.0.0.1:7391 remote-host:/remote/path
 ```
 
 空いているportを使う場合は`-addr :0`を指定できます。実際にlistenしたURLがログに表示されます。
@@ -154,13 +157,13 @@ listen address変更:
 request log:
 
 ```bash
-./remote-preview -v remote-host:/remote/path
+./bin/remote-preview -v remote-host:/remote/path
 ```
 
 debug log:
 
 ```bash
-DEBUG=1 ./remote-preview -addr 127.0.0.1:7391 remote-host:/remote/path
+DEBUG=1 ./bin/remote-preview -addr 127.0.0.1:7391 remote-host:/remote/path
 ```
 
 debug logは標準ライブラリの`log/slog`によるkey-value形式で、HTTP request、cache hit/miss、batch listingのfallback、SSH commandの`operation`・`remote_path`・`duration`・`bytes`を出力します。`DEBUG`未設定時はdebug levelのログを出力しません。`-v`は通常のrequest logを有効にします。
@@ -181,23 +184,26 @@ remote-preview
    | system ssh
    | (~/.ssh/config / ProxyJump / agent ...)
    v
+temporary helper or POSIX shell
+   |
 Remote filesystem
 ```
 
-リモートにはサーバプロセスを起動しません。
+リモートにはHTTP serverや恒久的daemonを起動しません。helperは短命processとしてSSH commandから起動し、remote-preview終了時にcleanupを試みます。
 
-## MVP limitations
+## Limitations
 
 - cacheされていないremote accessではSSH processを起動する
-- directory listingはremote shellを使う
+- directory listingはGo helperまたはportable remote shellを使う
 - directory listing cacheの既定TTLは10秒、最大256エントリ
-- ファイル名にtab/newlineが含まれる場合はdirectory listing非対応
+- batch listingのprotocolはtab/newlineを含むfilenameを保持する。single-directory shell fallbackではnewlineを含むfilenameを完全には扱えない
 - Range request未対応
 - live reload未対応
 - file edit / upload / rename / deleteは未対応
 - Markdown / Mermaidのrich renderingはCDN依存
 - SSH URI形式やIPv6 literalのtarget parserは未対応
 - Windows remote helperは未対応で、現状はshell fallbackを試みる
+- helperの初回setupではplatform判定とbinary uploadが発生するため、高RTTやProxyJump環境では初回表示が遅くなる場合がある
 
 SSH ControlMasterを有効にすると、requestごとのconnection overheadをかなり減らせます。
 
