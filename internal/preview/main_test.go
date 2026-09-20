@@ -7,11 +7,11 @@ import (
 )
 
 func TestParseTarget(t *testing.T) {
-	got, err := parseTarget("remote-host:/remote/path/docs")
+	got, err := parseTarget("remote-host:/remote/path")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Host != "remote-host" || got.Root != "/remote/path/docs" {
+	if got.Host != "remote-host" || got.Root != "/remote/path" {
 		t.Fatalf("unexpected target: %#v", got)
 	}
 }
@@ -37,11 +37,11 @@ func TestResolveTargetHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := resolveTarget(context.Background(), target, &fakeRemoteFS{home: "/home/remote-host"})
+	resolved, err := resolveTarget(context.Background(), target, &fakeRemoteFS{home: "/remote/home"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.Root != "/home/remote-host" || resolved.Home {
+	if resolved.Root != "/remote/home" || resolved.Home {
 		t.Fatalf("unexpected resolved target: %#v", resolved)
 	}
 }

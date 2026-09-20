@@ -30,6 +30,7 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
 - `Raw` 表示
 - directory listingのTTL cacheと同時アクセスの重複抑制
 - macOS / BusyBox互換のforeground batch listing
+- remote-side Go helperによるforeground batch listing（利用できない場合はshellへfallback）
 - SSH command/connect timeoutとrequest context cancellation
 - read-only
 
@@ -37,7 +38,7 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
 
 ```bash
 chmod +x remote-preview-darwin-arm64
-./remote-preview-darwin-arm64 -open remote-host:/remote/path/project
+./remote-preview-darwin-arm64 -open remote-host:/remote/path
 ```
 
 ブラウザで:
@@ -49,7 +50,7 @@ http://127.0.0.1:8080/
 ## Example
 
 ```bash
-./remote-preview-darwin-arm64 -open remote-user@remote.example.com:/remote/path/docs
+./remote-preview-darwin-arm64 -open remote-user@remote.example.com:/remote/path
 ```
 
 普段 `~/.ssh/config` にaliasを書いているなら、そのaliasをそのまま使えます。
@@ -57,16 +58,16 @@ http://127.0.0.1:8080/
 ```sshconfig
 Host remote-host
     HostName remote.example.com
-    User wiki
+    User remote-user
     ProxyJump bastion
 
 Host bastion
-    HostName example.com
-    User remote-user
+    HostName bastion.example.com
+    User jump-user
 ```
 
 ```bash
-./remote-preview-darwin-arm64 -open remote-host:/remote/path/project
+./remote-preview-darwin-arm64 -open remote-host:/remote/path
 ```
 
 ## Markdown / Mermaid
@@ -99,10 +100,18 @@ Go 1.23+のみ必要です。Go module dependencyはありません。
 go build -o remote-preview ./cmd/remote-preview
 ```
 
+remote-side helperの埋め込みartifactはLinux/darwinのamd64/arm64向けに同梱しています。artifactを再生成する場合は次を実行します。
+
+```bash
+go generate ./internal/preview
+```
+
 ## Project layout
 
 - `cmd/remote-preview`: CLI entrypoint only
+- `cmd/remote-preview-helper`: remote-side filesystem helper entrypoint
 - `internal/preview`: target parsing、SSH transport、directory cache、HTTP handler、templateとそのtests
+- `internal/remotehelper`: helperのfilesystem traversalとbatch protocol writer
 - `issues/`: 実装scopeと検証結果
 
 ## Usage
@@ -120,13 +129,13 @@ go build -o remote-preview ./cmd/remote-preview
 ブラウザを自動で開く:
 
 ```bash
-./remote-preview -open remote-host:/remote/path/project
+./remote-preview -open remote-host:/remote/path
 ```
 
 listen address変更:
 
 ```bash
-./remote-preview -addr 127.0.0.1:7391 remote-host:/remote/path/project
+./remote-preview -addr 127.0.0.1:7391 remote-host:/remote/path
 ```
 
 空いているportを使う場合は`-addr :0`を指定できます。実際にlistenしたURLがログに表示されます。
@@ -134,20 +143,20 @@ listen address変更:
 request log:
 
 ```bash
-./remote-preview -v remote-host:/remote/path/project
+./remote-preview -v remote-host:/remote/path
 ```
 
 debug log:
 
 ```bash
-DEBUG=1 ./remote-preview -addr 127.0.0.1:7391 remote-host:/remote/path/project
+DEBUG=1 ./remote-preview -addr 127.0.0.1:7391 remote-host:/remote/path
 ```
 
 debug logは標準ライブラリの`log/slog`によるkey-value形式で、HTTP request、cache hit/miss、batch listingのfallback、SSH commandの`operation`・`remote_path`・`duration`・`bytes`を出力します。`DEBUG`未設定時はdebug levelのログを出力しません。`-v`は通常のrequest logを有効にします。
 
 ## How it works
 
-ブラウザから要求が来ると、ローカル側の `remote-preview` がsystem `ssh` を呼びます。directory listingはcache miss時にforegroundで取得し、対応backendではcurrentと最大16個の直下directoryのlistingを1回のportable shell commandにまとめます。同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。batch commandが使えない場合はsingle-directory listingへfallbackします。background prefetchは行いません。ファイル内容はcacheしません。
+ブラウザから要求が来ると、ローカル側の `remote-preview` がsystem `ssh` を呼びます。directory listingはcache miss時にforegroundで取得し、対応platformでは一時配置したGo helperがcurrentと最大16個の直下directoryのlistingを1回で取得します。helperを利用できない場合はportable shell batchへ、さらに失敗した場合はsingle-directory listingへfallbackします。同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。background prefetchは行いません。ファイル内容はcacheしません。
 
 ```text
 Browser
@@ -175,6 +184,7 @@ Remote filesystem
 - file edit / upload / rename / deleteは未対応
 - Markdown / Mermaidのrich renderingはCDN依存
 - SSH URI形式やIPv6 literalのtarget parserは未対応
+- Windows remote helperは未対応で、現状はshell fallbackを試みる
 
 SSH ControlMasterを有効にすると、requestごとのconnection overheadをかなり減らせます。
 

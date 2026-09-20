@@ -9,6 +9,7 @@
 - `cmd/remote-preview`は薄いentrypointで、アプリケーション実装は`internal/preview`に配置されている。
 - directory listingはforegroundで取得し、必要に応じてportable batch commandで直下分も同じSSHにまとめ、TTL cacheとsingleflightで再利用する。
 - debug logは標準ライブラリの`log/slog`でHTTP、cache、batch、SSHの処理境界を追跡できる。
+- remote-side Go helperはIssue 010で実装中。既存shell batchをfallbackとして維持する。
 
 ## Product decisions
 
@@ -140,3 +141,4 @@ Acceptance criteria:
 5. Markdown fallbackとHTTP read path
 6. Go SSH prototypeとtransport選択
 7. root confinement policyとドキュメント
+8. remote-side Go filesystem helper

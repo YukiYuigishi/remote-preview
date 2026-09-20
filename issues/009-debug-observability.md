@@ -44,6 +44,6 @@
 - READMEに起動方法を追記した。
 - `go test ./...`、race、vet、build、browser操作の検証を完了した。
 - `go test -race ./...`、`go vet ./...`、`go build ./...`も通過した。
-- DEBUG=1で実ホストをブラウザ操作し、初回root listingと子directory遷移を計測した。
+- `DEBUG=1`で実ホストをブラウザ操作し、初回root listingと子directory遷移の体感・server durationを照合した。
 - 初回rootのbatchで子directoryのlistingがcacheされ、遷移時にSSH commandが発生しないことを確認した。
 - Chromeの自動`/favicon.ico` requestはmissing pathの判定で別SSHを発生させることが分かった。画面遷移の計測とは独立しており、不要なfavicon lookupの扱いは後続改善候補とする。

@@ -40,6 +40,11 @@ func Run(args []string, program string) error {
 	}
 
 	backend := newSSHRemoteFS(target.Host)
+	defer func() {
+		if closeErr := backend.Close(); closeErr != nil {
+			slog.Debug("remote helper cleanup failed", "host", target.Host, "error", closeErr)
+		}
+	}()
 	if target.Home {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		home, homeErr := backend.Home(ctx)

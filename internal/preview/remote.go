@@ -3,6 +3,8 @@ package preview
 import (
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os/exec"
@@ -10,7 +12,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"remote-preview/internal/remotehelper"
 )
 
 type remoteEntry struct {
@@ -44,6 +49,14 @@ type sshRemoteFS struct {
 	commandTimeout time.Duration
 	connectTimeout time.Duration
 	command        sshCommandFactory
+
+	helperMu        sync.Mutex
+	helperDone      chan struct{}
+	helperAttempted bool
+	helperPath      string
+	helperPlatform  string
+	helperErr       error
+	helperDisabled  bool
 }
 
 type sshCommandFactory func(context.Context, string, ...string) *exec.Cmd
@@ -54,6 +67,7 @@ func newSSHRemoteFS(host string) *sshRemoteFS {
 		commandTimeout: 30 * time.Second,
 		connectTimeout: 30 * time.Second,
 		command:        exec.CommandContext,
+		helperDone:     make(chan struct{}),
 	}
 }
 
@@ -180,11 +194,167 @@ done
 `
 
 func (s *sshRemoteFS) ListBatch(ctx context.Context, remotePath string) (batchListingResult, error) {
-	out, err := s.runNamed(ctx, "list_batch", remotePath, "sh", "-c", batchListingScript, "sh", remotePath, strconv.Itoa(batchMaxDirectories))
+	helperPath, err := s.ensureHelper(ctx)
+	if err == nil {
+		result, helperErr := s.listBatchWithHelper(ctx, helperPath, remotePath)
+		if helperErr == nil {
+			return result, nil
+		}
+		slog.Debug("remote helper failed; falling back to shell batch", "host", s.host, "remote_path", remotePath, "error", helperErr)
+		s.disableHelper()
+	} else {
+		slog.Debug("remote helper unavailable; falling back to shell batch", "host", s.host, "remote_path", remotePath, "error", err)
+	}
+
+	return s.listBatchWithShell(ctx, remotePath)
+}
+
+func (s *sshRemoteFS) listBatchWithHelper(ctx context.Context, helperPath, remotePath string) (batchListingResult, error) {
+	out, err := s.runNamed(ctx, "list_batch_helper", remotePath, helperPath, "list-batch", remotehelper.ProtocolVersion, remotePath, strconv.Itoa(batchMaxDirectories))
 	if err != nil {
 		return batchListingResult{}, err
 	}
 	return parseBatchListings(remotePath, out)
+}
+
+func (s *sshRemoteFS) listBatchWithShell(ctx context.Context, remotePath string) (batchListingResult, error) {
+	out, err := s.runNamed(ctx, "list_batch_shell", remotePath, "sh", "-c", batchListingScript, "sh", remotePath, strconv.Itoa(batchMaxDirectories))
+	if err != nil {
+		return batchListingResult{}, err
+	}
+	return parseBatchListings(remotePath, out)
+}
+
+const remoteHelperUploadScript = `set -eu
+tmpdir=${TMPDIR:-/tmp}
+path="$tmpdir/.remote-preview-helper-$1"
+umask 077
+cat > "$path"
+chmod 700 "$path"
+printf '%s' "$path"
+`
+
+func (s *sshRemoteFS) ensureHelper(ctx context.Context) (string, error) {
+	s.helperMu.Lock()
+	if s.helperAttempted {
+		done := s.helperDone
+		s.helperMu.Unlock()
+		select {
+		case <-done:
+			return s.helperState()
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	s.helperAttempted = true
+	done := s.helperDone
+	s.helperMu.Unlock()
+
+	platform, err := s.detectRemotePlatform(ctx)
+	var helperPath string
+	if err == nil {
+		helperPath, err = s.uploadHelper(ctx, platform)
+	}
+
+	s.helperMu.Lock()
+	s.helperPlatform = platform
+	s.helperPath = helperPath
+	s.helperErr = err
+	close(done)
+	s.helperMu.Unlock()
+	return helperPath, err
+}
+
+func (s *sshRemoteFS) helperState() (string, error) {
+	s.helperMu.Lock()
+	defer s.helperMu.Unlock()
+	if s.helperDisabled {
+		if s.helperErr != nil {
+			return "", s.helperErr
+		}
+		return "", fmt.Errorf("remote helper disabled")
+	}
+	return s.helperPath, s.helperErr
+}
+
+func (s *sshRemoteFS) disableHelper() {
+	s.helperMu.Lock()
+	s.helperDisabled = true
+	s.helperMu.Unlock()
+}
+
+func (s *sshRemoteFS) detectRemotePlatform(ctx context.Context) (string, error) {
+	script := `printf '%s\n%s\n' "$(uname -s)" "$(uname -m)"`
+	out, err := s.runNamed(ctx, "helper_platform", "", "sh", "-c", script, "sh")
+	if err != nil {
+		return "", err
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) != 2 {
+		return "", fmt.Errorf("invalid remote platform output: %q", out)
+	}
+	platform, err := remoteHelperPlatform(fields[0], fields[1])
+	if err != nil {
+		return "", err
+	}
+	slog.Debug("remote helper platform selected", "host", s.host, "platform", platform)
+	return platform, nil
+}
+
+func remoteHelperPlatform(goos, arch string) (string, error) {
+	normalizedOS := strings.ToLower(strings.TrimSpace(goos))
+	normalizedArch := strings.ToLower(strings.TrimSpace(arch))
+	switch normalizedOS {
+	case "linux":
+		switch normalizedArch {
+		case "x86_64", "amd64":
+			return "linux/amd64", nil
+		case "aarch64", "arm64":
+			return "linux/arm64", nil
+		}
+	case "darwin":
+		switch normalizedArch {
+		case "x86_64", "amd64":
+			return "darwin/amd64", nil
+		case "arm64":
+			return "darwin/arm64", nil
+		}
+	}
+	return "", fmt.Errorf("unsupported remote platform: %s/%s", goos, arch)
+}
+
+func (s *sshRemoteFS) uploadHelper(ctx context.Context, platform string) (string, error) {
+	binary, err := embeddedRemoteHelper(platform)
+	if err != nil {
+		return "", err
+	}
+	nonceBytes := make([]byte, 16)
+	if _, err := cryptorand.Read(nonceBytes); err != nil {
+		return "", fmt.Errorf("generate helper name: %w", err)
+	}
+	nonce := hex.EncodeToString(nonceBytes)
+	out, err := s.runNamedInput(ctx, "helper_upload", "", binary, "sh", "-c", remoteHelperUploadScript, "sh", nonce)
+	if err != nil {
+		return "", err
+	}
+	helperPath := strings.TrimSpace(string(out))
+	if helperPath == "" {
+		return "", fmt.Errorf("remote helper upload returned an empty path")
+	}
+	slog.Debug("remote helper uploaded", "host", s.host, "platform", platform, "remote_path", helperPath, "bytes", len(binary))
+	return helperPath, nil
+}
+
+func (s *sshRemoteFS) Close() error {
+	s.helperMu.Lock()
+	helperPath := s.helperPath
+	s.helperPath = ""
+	s.helperMu.Unlock()
+	if helperPath == "" {
+		return nil
+	}
+	_, err := s.runNamed(context.Background(), "helper_cleanup", helperPath, "sh", "-c", `rm -f "$1"`, "sh", helperPath)
+	return err
 }
 
 func parseBatchListings(root string, output []byte) (batchListingResult, error) {
@@ -257,6 +427,10 @@ func (s *sshRemoteFS) run(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 func (s *sshRemoteFS) runNamed(ctx context.Context, operation, remotePath string, args ...string) ([]byte, error) {
+	return s.runNamedInput(ctx, operation, remotePath, nil, args...)
+}
+
+func (s *sshRemoteFS) runNamedInput(ctx context.Context, operation, remotePath string, input []byte, args ...string) ([]byte, error) {
 	started := time.Now()
 	commandTimeout := s.commandTimeout
 	if commandTimeout <= 0 {
@@ -269,7 +443,7 @@ func (s *sshRemoteFS) runNamed(ctx context.Context, operation, remotePath string
 
 	runCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
-	slog.Debug("ssh command start", "host", s.host, "operation", operation, "remote_path", remotePath, "timeout", commandTimeout)
+	slog.Debug("ssh command start", "host", s.host, "operation", operation, "remote_path", remotePath, "timeout", commandTimeout, "input_bytes", len(input))
 
 	sshArgs := []string{
 		"-T",
@@ -284,6 +458,9 @@ func (s *sshRemoteFS) runNamed(ctx context.Context, operation, remotePath string
 		command = exec.CommandContext
 	}
 	cmd := command(runCtx, "ssh", sshArgs...)
+	if input != nil {
+		cmd.Stdin = bytes.NewReader(input)
+	}
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
