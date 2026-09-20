@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	cryptorand "crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -201,6 +202,7 @@ func (s *sshRemoteFS) ListBatch(ctx context.Context, remotePath string) (batchLi
 			return result, nil
 		}
 		slog.Debug("remote helper failed; falling back to shell batch", "host", s.host, "remote_path", remotePath, "error", helperErr)
+		s.invalidateHelper(ctx)
 		s.disableHelper()
 	} else {
 		slog.Debug("remote helper unavailable; falling back to shell batch", "host", s.host, "remote_path", remotePath, "error", err)
@@ -226,18 +228,87 @@ func (s *sshRemoteFS) listBatchWithShell(ctx context.Context, remotePath string)
 }
 
 const remoteHelperUploadScript = `set -eu
-if command -v mktemp >/dev/null 2>&1; then
-  path=$(mktemp "${TMPDIR:-/tmp}/.remote-preview-helper.XXXXXXXX")
-else
-  tmpdir=${TMPDIR:-/tmp}
-  path="$tmpdir/.remote-preview-helper-$1"
-  : > "$path"
+tmpdir=${TMPDIR:-/tmp}
+path="$tmpdir/$1"
+temp="$tmpdir/.remote-preview-helper-upload-$2"
+if [ -f "$path" ] && [ -x "$path" ]; then
+  printf '%s' "$path"
+  exit 0
 fi
 umask 077
-cat > "$path"
-chmod 700 "$path"
+trap 'rm -f "$temp"' EXIT HUP INT TERM
+cat > "$temp"
+chmod 700 "$temp"
+mv "$temp" "$path"
+trap - EXIT HUP INT TERM
 printf '%s' "$path"
 `
+
+const remoteHelperProbeScript = `set -eu
+case "$(uname -s):$(uname -m)" in
+  Linux:x86_64|Linux:amd64) platform=linux/amd64; name=$1;;
+  Linux:aarch64|Linux:arm64) platform=linux/arm64; name=$2;;
+  Darwin:x86_64|Darwin:amd64) platform=darwin/amd64; name=$3;;
+  Darwin:arm64) platform=darwin/arm64; name=$4;;
+  *) printf 'unsupported\n'; exit 0;;
+esac
+path="${TMPDIR:-/tmp}/$name"
+if [ -f "$path" ] && [ -x "$path" ]; then
+  printf 'ready\n%s\n%s\n' "$platform" "$path"
+else
+  printf 'missing\n%s\n%s\n' "$platform" "$path"
+fi
+`
+
+const remoteHelperCacheVersion = "1"
+
+type remoteHelperCacheCandidate struct {
+	platform string
+	name     string
+	binary   []byte
+}
+
+type remoteHelperProbeResult struct {
+	platform string
+	path     string
+	name     string
+	binary   []byte
+	hit      bool
+}
+
+func remoteHelperCacheName(platform string, binary []byte) string {
+	digest := sha256.Sum256(binary)
+	return fmt.Sprintf(".remote-preview-helper-v%s-%s-%x", remoteHelperCacheVersion, strings.ReplaceAll(platform, "/", "-"), digest)
+}
+
+func remoteHelperCacheCandidates() ([]remoteHelperCacheCandidate, error) {
+	platforms := []string{"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64"}
+	candidates := make([]remoteHelperCacheCandidate, 0, len(platforms))
+	for _, platform := range platforms {
+		binary, err := embeddedRemoteHelper(platform)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, remoteHelperCacheCandidate{
+			platform: platform,
+			name:     remoteHelperCacheName(platform, binary),
+			binary:   binary,
+		})
+	}
+	return candidates, nil
+}
+
+func parseRemoteHelperProbe(output []byte) (status, platform, helperPath string, err error) {
+	text := strings.TrimSuffix(string(output), "\n")
+	fields := strings.Split(text, "\n")
+	if len(fields) == 1 && fields[0] == "unsupported" {
+		return "", "", "", fmt.Errorf("unsupported remote platform")
+	}
+	if len(fields) != 3 || (fields[0] != "ready" && fields[0] != "missing") || fields[1] == "" || fields[2] == "" {
+		return "", "", "", fmt.Errorf("invalid remote helper probe output: %q", output)
+	}
+	return fields[0], fields[1], fields[2], nil
+}
 
 func (s *sshRemoteFS) ensureHelper(ctx context.Context) (string, error) {
 	s.helperMu.Lock()
@@ -255,14 +326,20 @@ func (s *sshRemoteFS) ensureHelper(ctx context.Context) (string, error) {
 	done := s.helperDone
 	s.helperMu.Unlock()
 
-	platform, err := s.detectRemotePlatform(ctx)
+	probe, err := s.probeHelper(ctx)
 	var helperPath string
 	if err == nil {
-		helperPath, err = s.uploadHelper(ctx, platform)
+		if probe.hit {
+			helperPath = probe.path
+			slog.Debug("remote helper cache hit", "host", s.host, "platform", probe.platform, "remote_path", helperPath, "cache_name", probe.name)
+		} else {
+			slog.Debug("remote helper cache miss", "host", s.host, "platform", probe.platform, "cache_name", probe.name)
+			helperPath, err = s.uploadHelper(ctx, probe.platform, probe.name, probe.binary)
+		}
 	}
 
 	s.helperMu.Lock()
-	s.helperPlatform = platform
+	s.helperPlatform = probe.platform
 	s.helperPath = helperPath
 	s.helperErr = err
 	close(done)
@@ -288,22 +365,50 @@ func (s *sshRemoteFS) disableHelper() {
 	s.helperMu.Unlock()
 }
 
-func (s *sshRemoteFS) detectRemotePlatform(ctx context.Context) (string, error) {
-	script := `printf '%s\n%s\n' "$(uname -s)" "$(uname -m)"`
-	out, err := s.runNamed(ctx, "helper_platform", "", "sh", "-c", script, "sh")
+func (s *sshRemoteFS) invalidateHelper(ctx context.Context) {
+	s.helperMu.Lock()
+	helperPath := s.helperPath
+	s.helperMu.Unlock()
+	if helperPath == "" {
+		return
+	}
+	_, err := s.runNamed(ctx, "helper_invalidate", helperPath, "sh", "-c", `rm -f "$1"`, "sh", helperPath)
 	if err != nil {
-		return "", err
+		slog.Debug("remote helper cache invalidation failed", "host", s.host, "remote_path", helperPath, "error", err)
+		return
 	}
-	fields := strings.Fields(string(out))
-	if len(fields) != 2 {
-		return "", fmt.Errorf("invalid remote platform output: %q", out)
-	}
-	platform, err := remoteHelperPlatform(fields[0], fields[1])
+	slog.Debug("remote helper cache invalidated", "host", s.host, "remote_path", helperPath)
+}
+
+func (s *sshRemoteFS) probeHelper(ctx context.Context) (remoteHelperProbeResult, error) {
+	candidates, err := remoteHelperCacheCandidates()
 	if err != nil {
-		return "", err
+		return remoteHelperProbeResult{}, err
 	}
-	slog.Debug("remote helper platform selected", "host", s.host, "platform", platform)
-	return platform, nil
+	args := []string{"sh", "-c", remoteHelperProbeScript, "sh"}
+	for _, candidate := range candidates {
+		args = append(args, candidate.name)
+	}
+	out, err := s.runNamed(ctx, "helper_probe", "", args...)
+	if err != nil {
+		return remoteHelperProbeResult{}, err
+	}
+	status, platform, helperPath, err := parseRemoteHelperProbe(out)
+	if err != nil {
+		return remoteHelperProbeResult{}, err
+	}
+	for _, candidate := range candidates {
+		if candidate.platform == platform {
+			return remoteHelperProbeResult{
+				platform: platform,
+				path:     helperPath,
+				name:     candidate.name,
+				binary:   candidate.binary,
+				hit:      status == "ready",
+			}, nil
+		}
+	}
+	return remoteHelperProbeResult{}, fmt.Errorf("unsupported remote platform: %s", platform)
 }
 
 func remoteHelperPlatform(goos, arch string) (string, error) {
@@ -328,17 +433,13 @@ func remoteHelperPlatform(goos, arch string) (string, error) {
 	return "", fmt.Errorf("unsupported remote platform: %s/%s", goos, arch)
 }
 
-func (s *sshRemoteFS) uploadHelper(ctx context.Context, platform string) (string, error) {
-	binary, err := embeddedRemoteHelper(platform)
-	if err != nil {
-		return "", err
-	}
+func (s *sshRemoteFS) uploadHelper(ctx context.Context, platform, cacheName string, binary []byte) (string, error) {
 	nonceBytes := make([]byte, 16)
 	if _, err := cryptorand.Read(nonceBytes); err != nil {
 		return "", fmt.Errorf("generate helper name: %w", err)
 	}
 	nonce := hex.EncodeToString(nonceBytes)
-	out, err := s.runNamedInput(ctx, "helper_upload", "", binary, "sh", "-c", remoteHelperUploadScript, "sh", nonce)
+	out, err := s.runNamedInput(ctx, "helper_upload", "", binary, "sh", "-c", remoteHelperUploadScript, "sh", cacheName, nonce)
 	if err != nil {
 		return "", err
 	}
@@ -346,20 +447,15 @@ func (s *sshRemoteFS) uploadHelper(ctx context.Context, platform string) (string
 	if helperPath == "" {
 		return "", fmt.Errorf("remote helper upload returned an empty path")
 	}
-	slog.Debug("remote helper uploaded", "host", s.host, "platform", platform, "remote_path", helperPath, "bytes", len(binary))
+	slog.Debug("remote helper uploaded", "host", s.host, "platform", platform, "remote_path", helperPath, "cache_name", cacheName, "bytes", len(binary))
 	return helperPath, nil
 }
 
 func (s *sshRemoteFS) Close() error {
 	s.helperMu.Lock()
-	helperPath := s.helperPath
 	s.helperPath = ""
 	s.helperMu.Unlock()
-	if helperPath == "" {
-		return nil
-	}
-	_, err := s.runNamed(context.Background(), "helper_cleanup", helperPath, "sh", "-c", `rm -f "$1"`, "sh", helperPath)
-	return err
+	return nil
 }
 
 func parseBatchListings(root string, output []byte) (batchListingResult, error) {

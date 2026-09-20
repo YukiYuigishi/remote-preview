@@ -2,7 +2,7 @@
 
 SSH先のディレクトリを、ローカルブラウザから **read-only Webファイラー** として閲覧する小さなCLIです。
 
-リモート側にHTTPサーバや恒久的なagentを入れず、system `ssh` で必要な処理だけを実行します。directory batch listingでは、対応platform向けのGo helperを一時配置して使います。
+リモート側にHTTPサーバや恒久的なagentを入れず、system `ssh` で必要な処理だけを実行します。directory batch listingでは、対応platform向けのGo helperをremote `TMPDIR`配下へversion/hash付きで配置し、次回以降も再利用します。
 
 ## Features
 
@@ -170,9 +170,9 @@ debug logは標準ライブラリの`log/slog`によるkey-value形式で、HTTP
 
 ## How it works
 
-ブラウザから要求が来ると、ローカル側の `remote-preview` がsystem `ssh` を呼びます。directory listingはcache miss時にforegroundで取得し、対応platformでは一時配置したGo helperがcurrentと最大16個の直下directoryのlistingを1回で取得します。helperを利用できない場合はportable shell batchへ、さらに失敗した場合はsingle-directory listingへfallbackします。同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。background prefetchは行いません。ファイル内容はcacheしません。
+ブラウザから要求が来ると、ローカル側の `remote-preview` がsystem `ssh` を呼びます。directory listingはcache miss時にforegroundで取得し、対応platformではremote `TMPDIR`に残したGo helperがcurrentと最大16個の直下directoryのlistingを1回で取得します。helper cacheがなければatomicにuploadし、同じhelper binaryが残っていればbinary転送を省略します。helperを利用できない場合はportable shell batchへ、さらに失敗した場合はsingle-directory listingへfallbackします。同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。background prefetchは行いません。ファイル内容はcacheしません。
 
-helperは最初のbatch listing時にremote platform判定とtemporary directoryへのuploadを行うため、ProxyJumpや高RTTの環境では最初の表示だけshell batchより遅くなる場合があります。helperはremote-previewのprocess中だけ利用し、終了時にcleanupを試みます。
+helperは最初のbatch listing時にremote platform判定を行います。cache miss時だけbinary uploadが発生するため、ProxyJumpや高RTTの環境でも同じhelper binaryを使う次回起動では転送コストを抑えられます。cache filenameにはcache version、platform、展開後binaryのSHA-256を含めます。helper実行に失敗した場合は該当cacheを削除してshell batchへfallbackします。
 
 ```text
 Browser
@@ -184,12 +184,12 @@ remote-preview
    | system ssh
    | (~/.ssh/config / ProxyJump / agent ...)
    v
-temporary helper or POSIX shell
+versioned helper cache or POSIX shell
    |
 Remote filesystem
 ```
 
-リモートにはHTTP serverや恒久的daemonを起動しません。helperは短命processとしてSSH commandから起動し、remote-preview終了時にcleanupを試みます。
+リモートにはHTTP serverや恒久的daemonを起動しません。helper自体はSSH commandから起動する短命processですが、helper binaryは次回起動で再利用するためremote `TMPDIR`に残ります。stale cacheの自動GCはまだ行いません。
 
 ## Limitations
 
@@ -203,7 +203,8 @@ Remote filesystem
 - Markdown / Mermaidのrich renderingはCDN依存
 - SSH URI形式やIPv6 literalのtarget parserは未対応
 - Windows remote helperは未対応で、現状はshell fallbackを試みる
-- helperの初回setupではplatform判定とbinary uploadが発生するため、高RTTやProxyJump環境では初回表示が遅くなる場合がある
+- helper cacheがない場合はplatform判定とbinary uploadが発生するため、高RTTやProxyJump環境では初回表示が遅くなる場合がある。cache hit時はbinary uploadを行わない
+- remote helper cacheのstale entryは自動GCしない
 
 SSH ControlMasterを有効にすると、requestごとのconnection overheadをかなり減らせます。
 

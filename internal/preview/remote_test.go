@@ -3,6 +3,8 @@ package preview
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
@@ -140,16 +142,48 @@ func TestRemoteHelperPlatform(t *testing.T) {
 	}
 }
 
+func TestRemoteHelperCacheNameContainsVersionPlatformAndHash(t *testing.T) {
+	binary := []byte("helper-binary")
+	digest := sha256.Sum256(binary)
+	want := ".remote-preview-helper-v1-linux-amd64-" + hex.EncodeToString(digest[:])
+	if got := remoteHelperCacheName("linux/amd64", binary); got != want {
+		t.Fatalf("cache name=%q, want %q", got, want)
+	}
+}
+
+func TestSSHRemoteFSHelperCacheHitAvoidsUpload(t *testing.T) {
+	remote := newSSHRemoteFS("remote-host")
+	remote.command = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		remoteCommand := args[len(args)-1]
+		if !strings.Contains(remoteCommand, "uname -s") {
+			t.Fatalf("unexpected command: %q", remoteCommand)
+		}
+		return exec.CommandContext(ctx, "sh", "-c", "printf 'ready\\nlinux/amd64\\n/tmp/.remote-preview-helper-cache\\n'")
+	}
+
+	got, err := remote.ensureHelper(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/tmp/.remote-preview-helper-cache" {
+		t.Fatalf("helper path=%q", got)
+	}
+}
+
 func TestSSHRemoteFSHelperFailureFallsBackToShellBatch(t *testing.T) {
 	remote := newSSHRemoteFS("remote-host")
 	remote.helperAttempted = true
 	remote.helperPath = "/tmp/remote-preview-helper-test"
 	remote.helperDone = make(chan struct{})
 	close(remote.helperDone)
+	invalidated := false
 	remote.command = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
 		remoteCommand := args[len(args)-1]
 		if strings.Contains(remoteCommand, "list-batch") {
 			return exec.CommandContext(ctx, "sh", "-c", "printf invalid")
+		}
+		if strings.Contains(remoteCommand, "rm -f") {
+			invalidated = true
 		}
 		return exec.CommandContext(ctx, "sh", "-c", "printf 'K\\0dir\\0D\\0\\0X\\0'")
 	}
@@ -163,6 +197,9 @@ func TestSSHRemoteFSHelperFailureFallsBackToShellBatch(t *testing.T) {
 	}
 	if !remote.helperDisabled {
 		t.Fatal("helper should be disabled after execution failure")
+	}
+	if !invalidated {
+		t.Fatal("helper cache should be invalidated after execution failure")
 	}
 }
 
@@ -203,7 +240,8 @@ func TestSSHRemoteFSHelperAssetsAreEmbedded(t *testing.T) {
 
 func TestRemoteHelperUploadScriptUsesTemporaryDirectory(t *testing.T) {
 	tempDir := t.TempDir()
-	cmd := exec.Command("sh", "-c", remoteHelperUploadScript, "sh", "nonce")
+	cacheName := ".remote-preview-helper-v1-linux-amd64-test"
+	cmd := exec.Command("sh", "-c", remoteHelperUploadScript, "sh", cacheName, "nonce")
 	cmd.Env = append(os.Environ(), "TMPDIR="+tempDir)
 	cmd.Stdin = strings.NewReader("helper-binary")
 	out, err := cmd.Output()
@@ -216,7 +254,61 @@ func TestRemoteHelperUploadScriptUsesTemporaryDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(content) != "helper-binary" || !strings.HasPrefix(helperPath, tempDir+string(os.PathSeparator)) {
+	info, err := os.Stat(helperPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "helper-binary" || helperPath != tempDir+string(os.PathSeparator)+cacheName || info.Mode().Perm() != 0o700 {
 		t.Fatalf("helper path/content = %q/%q", helperPath, content)
+	}
+}
+
+func TestSSHRemoteFSCloseKeepsPersistentHelper(t *testing.T) {
+	remote := newSSHRemoteFS("remote-host")
+	remote.helperPath = "/tmp/.remote-preview-helper-v1-linux-amd64-hash"
+	called := false
+	remote.command = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		called = true
+		return exec.CommandContext(ctx, "sh", "-c", "true")
+	}
+
+	if err := remote.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("Close should not remove persistent helper cache")
+	}
+}
+
+func TestParseRemoteHelperProbe(t *testing.T) {
+	tests := []struct {
+		name       string
+		output     string
+		wantStatus string
+		wantOS     string
+		wantPath   string
+		wantErr    bool
+	}{
+		{name: "ready", output: "ready\nlinux/amd64\n/tmp/path with spaces/helper\n", wantStatus: "ready", wantOS: "linux/amd64", wantPath: "/tmp/path with spaces/helper"},
+		{name: "missing", output: "missing\ndarwin/arm64\n/tmp/helper\n", wantStatus: "missing", wantOS: "darwin/arm64", wantPath: "/tmp/helper"},
+		{name: "unsupported", output: "unsupported\n", wantErr: true},
+		{name: "invalid", output: "ready\nlinux/amd64\n", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, platform, helperPath, err := parseRemoteHelperProbe([]byte(tt.output))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status != tt.wantStatus || platform != tt.wantOS || helperPath != tt.wantPath {
+				t.Fatalf("probe=%q/%q/%q", status, platform, helperPath)
+			}
+		})
 	}
 }
