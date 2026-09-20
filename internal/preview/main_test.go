@@ -3,7 +3,9 @@ package preview
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -135,5 +137,74 @@ func TestPreviewURLForUsesLoopbackForUnspecifiedAddress(t *testing.T) {
 	want := "http://127.0.0.1:7391/"
 	if got != want {
 		t.Fatalf("previewURLFor()=%q want %q", got, want)
+	}
+}
+
+func TestListenTCPWithPortFallbackUsesNextPortWhenRequestedPortIsOccupied(t *testing.T) {
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+
+	_, portText, err := net.SplitHostPort(occupied.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if port == 65535 {
+		t.Skip("cannot test a port after 65535")
+	}
+
+	listener, err := listenTCPWithPortFallback(fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	_, actualPortText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualPort, err := strconv.Atoi(actualPortText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actualPort <= port {
+		t.Fatalf("fallback port=%d, want a port after occupied port %d", actualPort, port)
+	}
+}
+
+func TestListenTCPWithPortFallbackKeepsFreePort(t *testing.T) {
+	reserved, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservedPort := reserved.Addr().(*net.TCPAddr).Port
+	reserved.Close()
+
+	listener, err := listenTCPWithPortFallback(fmt.Sprintf("127.0.0.1:%d", reservedPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	if got := listener.Addr().(*net.TCPAddr).Port; got != reservedPort {
+		t.Fatalf("port=%d, want requested free port %d", got, reservedPort)
+	}
+}
+
+func TestListenTCPWithPortFallbackKeepsEphemeralPortSemantics(t *testing.T) {
+	listener, err := listenTCPWithPortFallback("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	if got := listener.Addr().(*net.TCPAddr).Port; got == 0 {
+		t.Fatal("ephemeral listener did not receive a port")
 	}
 }

@@ -12,6 +12,7 @@
 - remote-side Go helperはIssue 010/015で実装済み。remote `TMPDIR`のversion/hash付きcacheを再利用し、既存shell batchをfallbackとして維持する。
 - helper cache miss時のbinary uploadはSSH compressionを使い、失敗時はraw uploadへfallbackする。
 - text-like fileはbrowser内viewerへ送り、対応source codeは同梱したbrowser-side highlight.jsでsyntax highlightを利用する。assetやrich renderingに失敗した場合はplain text/sourceへfallbackする。
+- HTML fileは通常のfile linkから同一originの`text/html`として直接表示し、listen portが使用中なら後続の空きportへ自動でずらす。
 - Markdown、Mermaid、highlight.jsのbrowser assetはversion固定でbinaryへembedし、localhostから配信する。runtime CDN依存はない。
 - MakefileはIssue 011でbuild、helper生成、test、race、vet、check、cleanを再現する。
 

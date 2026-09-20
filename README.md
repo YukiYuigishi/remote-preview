@@ -19,7 +19,7 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
 - remote-side Go helper（Linux/darwinのamd64/arm64）でcurrentと直下directoryをbatch listing
 - helperが使えない場合はPOSIX `sh`（macOS / BusyBoxを含む）のbatch listingへfallback
 - ディレクトリ一覧とbreadcrumb navigation
-- HTML: そのままブラウザでpreview
+- HTML: そのままブラウザでpreview（通常のファイルリンクから直接表示）
 - Markdown: GitHub Flavored Markdown (GFM) preview
   - tables
   - strikethrough
@@ -166,7 +166,7 @@ listen address変更:
 ./bin/remote-preview -addr 127.0.0.1:7391 remote-host:/remote/path
 ```
 
-空いているportを使う場合は`-addr :0`を指定できます。実際にlistenしたURLが`open: http://.../`形式の通常出力として表示されます。diagnostic logはstderrへ出力されます。
+指定portが使用中の場合は、同じhostの後続portへ自動的にずらしてlistenします。空いているportを使う場合は`-addr :0`を指定できます。実際にlistenしたURLが`open: http://.../`形式の通常出力として表示されます。diagnostic logはstderrへ出力されます。
 
 request log:
 
@@ -214,6 +214,7 @@ Remote filesystem
 - Range request未対応
 - live reload未対応
 - file edit / upload / rename / deleteは未対応
+- HTML/SVGはread-only用途の同一origin上で直接表示するため、信頼できるremote fileだけを開く
 - Markdown / Mermaid / syntax highlightのbrowser assetを同梱するため、binary sizeが増える
 - SSH URI形式やIPv6 literalのtarget parserは未対応
 - Windows remote helperは未対応で、現状はshell fallbackを試みる
