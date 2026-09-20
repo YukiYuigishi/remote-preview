@@ -4,7 +4,7 @@ BINDIR ?= bin
 APP := $(BINDIR)/remote-preview
 HELPER := $(BINDIR)/remote-preview-helper
 
-.PHONY: all build build-helper generate test test-race vet check clean
+.PHONY: all build build-helper install generate test test-race vet check clean
 
 all: build
 
@@ -15,6 +15,9 @@ build: generate
 build-helper:
 	mkdir -p "$(BINDIR)"
 	$(GO) build -trimpath -o "$(HELPER)" ./cmd/remote-preview-helper
+
+install:
+	$(GO) install -trimpath ./cmd/remote-preview
 
 generate:
 	GO="$(GO)" $(GO) generate ./internal/preview
