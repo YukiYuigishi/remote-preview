@@ -1,6 +1,7 @@
 package preview
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -10,6 +11,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type handler struct {
@@ -96,7 +98,6 @@ func (h *handler) serveDirectory(w http.ResponseWriter, r *http.Request, rel, re
 			icon = "🌐"
 			kindLabel = "html"
 		} else if isPlainText(entry.Name) {
-			href += "?view=1"
 			kindLabel = "text"
 		}
 		items = append(items, viewEntry{Name: entry.Name, Href: href, Icon: icon, Kind: kindLabel})
@@ -142,7 +143,7 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, rel, remoteP
 		return
 	}
 
-	if isPlainText(remotePath) && !isHTML(remotePath) && r.URL.Query().Get("view") == "1" {
+	if isTextFile(remotePath, data) {
 		h.serveText(w, r, rel, remotePath, data)
 		return
 	}
@@ -188,20 +189,28 @@ func (h *handler) serveText(w http.ResponseWriter, r *http.Request, rel, remoteP
 		return
 	}
 
+	jsonSource, _ := json.Marshal(string(source))
+	jsonLanguage, _ := json.Marshal(syntaxLanguage(remotePath))
 	data := struct {
-		Name       string
-		Host       string
-		RemotePath string
-		Breadcrumb template.HTML
-		RawURL     string
-		Source     string
+		Name         string
+		Host         string
+		RemotePath   string
+		Breadcrumb   template.HTML
+		RawURL       string
+		Source       string
+		SourceJSON   template.JS
+		Language     string
+		LanguageJSON template.JS
 	}{
-		Name:       path.Base(remotePath),
-		Host:       h.target.Host,
-		RemotePath: remotePath,
-		Breadcrumb: breadcrumbHTML(r.URL.EscapedPath(), false),
-		RawURL:     withRawQuery(r.URL),
-		Source:     string(source),
+		Name:         path.Base(remotePath),
+		Host:         h.target.Host,
+		RemotePath:   remotePath,
+		Breadcrumb:   breadcrumbHTML(r.URL.EscapedPath(), false),
+		RawURL:       withRawQuery(r.URL),
+		Source:       string(source),
+		SourceJSON:   template.JS(jsonSource),
+		Language:     syntaxLanguage(remotePath),
+		LanguageJSON: template.JS(jsonLanguage),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -254,10 +263,93 @@ func isImage(p string) bool {
 
 func isPlainText(p string) bool {
 	switch strings.ToLower(path.Ext(p)) {
-	case ".txt", ".log", ".json", ".yaml", ".yml", ".toml", ".xml", ".csv", ".go", ".rs", ".c", ".h", ".cpp", ".hpp", ".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".css", ".scss", ".sh", ".bash", ".zsh", ".fish", ".sql", ".conf", ".ini", ".env":
+	case ".txt", ".text", ".log", ".json", ".yaml", ".yml", ".toml", ".xml", ".csv", ".tsv", ".go", ".rs", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".java", ".kt", ".kts", ".swift", ".rb", ".php", ".pl", ".lua", ".r", ".scala", ".ex", ".exs", ".erl", ".hrl", ".hs", ".fs", ".fsx", ".vb", ".groovy", ".gradle", ".css", ".scss", ".less", ".sh", ".bash", ".zsh", ".fish", ".bat", ".cmd", ".ps1", ".sql", ".conf", ".ini", ".properties", ".env", ".lock", ".patch", ".diff", ".tex", ".rst", ".adoc", ".graphql", ".gql", ".proto", ".tf", ".hcl", ".vim":
 		return true
 	default:
 		name := strings.ToLower(path.Base(p))
-		return name == "makefile" || name == "dockerfile" || name == "license" || name == "readme"
+		return name == "makefile" || name == "dockerfile" || name == "license" || name == "readme" || name == ".gitignore" || name == ".gitattributes" || name == ".gitconfig" || name == ".editorconfig" || name == ".npmrc" || name == ".nvmrc" || name == ".prettierrc"
+	}
+}
+
+func isTextFile(p string, data []byte) bool {
+	return isPlainText(p) || isLikelyText(data)
+}
+
+func isLikelyText(data []byte) bool {
+	if len(data) == 0 || bytes.IndexByte(data, 0) >= 0 || !utf8.Valid(data) {
+		return len(data) == 0
+	}
+	controlBytes := 0
+	for _, b := range data {
+		if b < 0x20 && b != '\t' && b != '\n' && b != '\r' && b != '\f' {
+			controlBytes++
+		}
+	}
+	return controlBytes*20 <= len(data)
+}
+
+func syntaxLanguage(p string) string {
+	switch strings.ToLower(path.Ext(p)) {
+	case ".go":
+		return "go"
+	case ".rs":
+		return "rust"
+	case ".c", ".h":
+		return "c"
+	case ".cc", ".cpp", ".cxx", ".hpp":
+		return "cpp"
+	case ".json":
+		return "json"
+	case ".yaml", ".yml":
+		return "yaml"
+	case ".toml":
+		return "ini"
+	case ".xml":
+		return "xml"
+	case ".py":
+		return "python"
+	case ".js", ".mjs", ".cjs", ".jsx":
+		return "javascript"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".java":
+		return "java"
+	case ".kt", ".kts":
+		return "kotlin"
+	case ".swift":
+		return "swift"
+	case ".rb":
+		return "ruby"
+	case ".php":
+		return "php"
+	case ".lua":
+		return "lua"
+	case ".css":
+		return "css"
+	case ".scss":
+		return "scss"
+	case ".sh", ".bash", ".zsh", ".fish":
+		return "shell"
+	case ".sql":
+		return "sql"
+	case ".conf", ".ini", ".properties":
+		return "ini"
+	case ".diff", ".patch":
+		return "diff"
+	case ".graphql", ".gql":
+		return "graphql"
+	case ".proto":
+		return "protobuf"
+	case ".tf", ".hcl":
+		return "hcl"
+	default:
+		name := strings.ToLower(path.Base(p))
+		if name == "dockerfile" {
+			return "dockerfile"
+		}
+		if name == "makefile" {
+			return "makefile"
+		}
+		return ""
 	}
 }

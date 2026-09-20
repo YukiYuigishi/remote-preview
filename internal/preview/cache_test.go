@@ -16,11 +16,13 @@ type fakeRemoteFS struct {
 	home  string
 	kinds map[string]string
 	lists map[string][]remoteEntry
+	reads map[string][]byte
 
 	listCalls map[string]int
 	kindCalls map[string]int
 	listErr   map[string]error
 	listBlock map[string]<-chan struct{}
+	readErr   map[string]error
 }
 
 func newFakeRemoteFS() *fakeRemoteFS {
@@ -28,10 +30,12 @@ func newFakeRemoteFS() *fakeRemoteFS {
 		home:      "/home/test",
 		kinds:     make(map[string]string),
 		lists:     make(map[string][]remoteEntry),
+		reads:     make(map[string][]byte),
 		listCalls: make(map[string]int),
 		kindCalls: make(map[string]int),
 		listErr:   make(map[string]error),
 		listBlock: make(map[string]<-chan struct{}),
+		readErr:   make(map[string]error),
 	}
 }
 
@@ -71,8 +75,13 @@ func (f *fakeRemoteFS) List(ctx context.Context, remotePath string) ([]remoteEnt
 	return entries, nil
 }
 
-func (f *fakeRemoteFS) Read(context.Context, string) ([]byte, error) {
-	return nil, errors.New("not implemented")
+func (f *fakeRemoteFS) Read(_ context.Context, remotePath string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.readErr[remotePath]; err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), f.reads[remotePath]...), nil
 }
 
 func (f *fakeRemoteFS) calls(path string) int {
