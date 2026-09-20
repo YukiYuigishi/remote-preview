@@ -94,16 +94,27 @@ Markdown renderer / Mermaidは現在jsDelivrからbrowser側で読み込むた�
 
 ## Build
 
-Go 1.23+のみ必要です。Go module dependencyはありません。
+Go 1.23+のみ必要です。Go module dependencyはありません。通常のbuildと検証はMakefileから実行できます。
 
 ```bash
-go build -o remote-preview ./cmd/remote-preview
+make build
+./bin/remote-preview
 ```
 
 remote-side helperの埋め込みartifactはLinux/darwinのamd64/arm64向けに同梱しています。artifactを再生成する場合は次を実行します。
 
 ```bash
 go generate ./internal/preview
+```
+
+主なdevelopment command:
+
+```bash
+make test       # go test ./...
+make test-race  # go test -race ./...
+make vet        # go vet ./...
+make check      # generate + test + race + vet + build
+make clean      # bin/のMakefile生成物を削除
 ```
 
 ## Project layout
