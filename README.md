@@ -8,6 +8,7 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
 
 - `host:/absolute/path` を指定してWebファイラーとして閲覧
 - `host` だけを指定すると、リモートのhome directoryを閲覧
+- `.`, `./relative/path`, `../relative/path`, `/absolute/path`を指定するとlocal filesystemを閲覧
 - system `ssh` を利用
   - `~/.ssh/config`
   - Host alias
@@ -145,13 +146,28 @@ make clean      # bin/のMakefile生成物を削除
 ## Usage
 
 ```bash
-./bin/remote-preview [options] host:/absolute/path
+./bin/remote-preview [options] target
+```
+
+local filesystemを表示する場合:
+
+```bash
+./bin/remote-preview .
+./bin/remote-preview ./subdir
+./bin/remote-preview /absolute/path
 ```
 
 リモートhomeを開く場合はhostだけを指定できます。
 
 ```bash
 ./bin/remote-preview remote-host
+```
+
+リモートのhome基準のpathも指定できます。
+
+```bash
+./bin/remote-preview remote-host:~/projects
+./bin/remote-preview remote-host:projects
 ```
 
 ブラウザはデフォルトで自動的に開きます。自動起動を無効にする場合:

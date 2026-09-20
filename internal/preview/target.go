@@ -5,36 +5,43 @@ import (
 	"fmt"
 	"html/template"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 )
 
 type remoteTarget struct {
-	Host string
-	Root string
-	Home bool
+	Host  string
+	Root  string
+	Home  bool
+	Local bool
 }
 
 func parseTarget(s string) (remoteTarget, error) {
+	if isLocalTarget(s) {
+		return remoteTarget{Root: s, Local: true}, nil
+	}
+
 	if !strings.Contains(s, ":") {
 		if s == "" {
-			return remoteTarget{}, fmt.Errorf("target must be host[:/absolute/path]")
+			return remoteTarget{}, fmt.Errorf("target must be a local path or host[:path]")
 		}
 		return remoteTarget{Host: s, Home: true}, nil
 	}
 
 	i := strings.IndexByte(s, ':')
 	if i <= 0 || i == len(s)-1 {
-		return remoteTarget{}, fmt.Errorf("target must be host:/absolute/path")
+		return remoteTarget{}, fmt.Errorf("target must be host[:path]")
 	}
 
 	host := s[:i]
 	root := s[i+1:]
-	if !strings.HasPrefix(root, "/") {
-		return remoteTarget{}, fmt.Errorf("remote path must be absolute: %q", root)
+	if strings.HasPrefix(root, "/") {
+		return remoteTarget{Host: host, Root: path.Clean(root)}, nil
 	}
 
-	return remoteTarget{Host: host, Root: path.Clean(root)}, nil
+	return remoteTarget{Host: host, Root: root, Home: true}, nil
 }
 
 func resolveTarget(ctx context.Context, target remoteTarget, remote RemoteFS) (remoteTarget, error) {
@@ -50,9 +57,51 @@ func resolveTarget(ctx context.Context, target remoteTarget, remote RemoteFS) (r
 	return target, nil
 }
 
+func resolveLocalTarget(target remoteTarget) (remoteTarget, error) {
+	if !target.Local {
+		return target, nil
+	}
+
+	root := target.Root
+	if root == "~" || strings.HasPrefix(root, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return remoteTarget{}, fmt.Errorf("resolve local home: %w", err)
+		}
+		if root == "~" {
+			root = home
+		} else {
+			root = filepath.Join(home, root[2:])
+		}
+	}
+
+	absolute, err := filepath.Abs(root)
+	if err != nil {
+		return remoteTarget{}, fmt.Errorf("resolve local target %q: %w", target.Root, err)
+	}
+	target.Host = "local"
+	target.Root = filepath.Clean(absolute)
+	return target, nil
+}
+
 func (t *remoteTarget) setResolvedHome(home string) {
-	t.Root = path.Clean(home)
+	if t.Root == "" || t.Root == "~" {
+		t.Root = path.Clean(home)
+	} else {
+		relative := strings.TrimPrefix(t.Root, "~/")
+		t.Root = path.Clean(path.Join(home, relative))
+	}
 	t.Home = false
+}
+
+func isLocalTarget(s string) bool {
+	if s == "~" || strings.HasPrefix(s, "~/") {
+		return true
+	}
+	if filepath.IsAbs(s) {
+		return true
+	}
+	return s == "." || s == ".." || strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../")
 }
 
 func cleanRelativeURLPath(p string) string {

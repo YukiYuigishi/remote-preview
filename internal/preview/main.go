@@ -31,7 +31,7 @@ func newCLIOptions(program string) *cliOptions {
 	openPage := flags.Bool("open", true, "open the file browser in the default browser (use -open=false to disable)")
 	verbose := flags.Bool("v", false, "log each request")
 	flags.Usage = func() {
-		fmt.Fprintf(flags.Output(), "Usage: %s [options] host[:/remote/path]\n\n", filepath.Base(program))
+		fmt.Fprintf(flags.Output(), "Usage: %s [options] target\n\n", filepath.Base(program))
 		flags.PrintDefaults()
 	}
 	return &cliOptions{flags: flags, addr: addr, openPage: openPage, verbose: verbose}
@@ -54,13 +54,28 @@ func Run(args []string, program string) error {
 		return err
 	}
 
-	backend := newSSHRemoteFS(target.Host)
+	var backend RemoteFS
+	var closer io.Closer
+	if target.Local {
+		target, err = resolveLocalTarget(target)
+		if err != nil {
+			return err
+		}
+		backend = newLocalRemoteFS()
+	} else {
+		sshBackend := newSSHRemoteFS(target.Host)
+		backend = sshBackend
+		closer = sshBackend
+	}
 	defer func() {
-		if closeErr := backend.Close(); closeErr != nil {
-			slog.Debug("remote helper cleanup failed", "host", target.Host, "error", closeErr)
+		if closer != nil {
+			if closeErr := closer.Close(); closeErr != nil {
+				slog.Debug("remote helper cleanup failed", "host", target.Host, "error", closeErr)
+			}
 		}
 	}()
-	if target.Home {
+
+	if !target.Local && target.Home {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		home, homeErr := backend.Home(ctx)
 		cancel()
