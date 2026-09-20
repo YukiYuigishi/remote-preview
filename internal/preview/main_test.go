@@ -1,10 +1,28 @@
 package preview
 
 import (
+	"bytes"
 	"context"
 	"net"
+	"strings"
 	"testing"
 )
+
+func TestWriteStartupInfoUsesPlainURLOutput(t *testing.T) {
+	var output bytes.Buffer
+	writeStartupInfo(&output, remoteTarget{Host: "remote-host", Root: "/remote/path"}, "http://127.0.0.1:7391/")
+
+	got := output.String()
+	if !strings.Contains(got, "browsing remote-host:/remote/path\n") {
+		t.Fatalf("startup target output=%q", got)
+	}
+	if !strings.Contains(got, "open: http://127.0.0.1:7391/\n") {
+		t.Fatalf("startup URL output=%q", got)
+	}
+	if strings.Contains(got, "level=") || strings.Contains(got, "msg=") {
+		t.Fatalf("startup output contains structured log fields: %q", got)
+	}
+}
 
 func TestParseTarget(t *testing.T) {
 	got, err := parseTarget("remote-host:/remote/path")
