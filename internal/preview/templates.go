@@ -63,6 +63,8 @@ var markdownTemplate = template.Must(template.New("markdown").Parse(`<!doctype h
   <div id="notice" class="notice" hidden></div>
   <article id="rendered"></article>
   <pre id="source" hidden></pre>
+  <script src="/_remote-preview/assets/v1/marked.js"></script>
+  <script src="/_remote-preview/assets/v1/mermaid.js"></script>
   <script>
     const source = {{.SourceJSON}};
     const rendered = document.getElementById('rendered');
@@ -79,16 +81,17 @@ var markdownTemplate = template.Must(template.New("markdown").Parse(`<!doctype h
       sourceView.hidden = !isHidden;
       rendered.hidden = isHidden;
     });
-    import('https://cdn.jsdelivr.net/npm/marked@15/+esm')
-      .then(({ marked }) => {
-        rendered.innerHTML = marked.parse(source, { gfm: true, breaks: false });
-        return import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs');
-      })
-      .then(({ default: mermaid }) => {
-        mermaid.initialize({ startOnLoad: false });
-        return mermaid.run({ querySelector: 'pre code.language-mermaid' });
-      })
-      .catch(() => showSource('Rich preview could not be loaded. Showing Markdown source.'));
+    try {
+      if (!window.marked || !window.mermaid) {
+        throw new Error('preview assets unavailable');
+      }
+      rendered.innerHTML = window.marked.parse(source, { gfm: true, breaks: false });
+      window.mermaid.initialize({ startOnLoad: false });
+      Promise.resolve(window.mermaid.run({ querySelector: 'pre code.language-mermaid' }))
+        .catch(() => showSource('Rich preview could not be loaded. Showing Markdown source.'));
+    } catch (_) {
+      showSource('Rich preview could not be loaded. Showing Markdown source.');
+    }
   </script>
 </body>
 </html>`))
@@ -107,7 +110,7 @@ var textTemplate = template.Must(template.New("text").Parse(`<!doctype html>
     .toolbar { display: flex; gap: .8rem; margin-bottom: 1rem; }
     pre { overflow: auto; padding: 1rem; border-radius: .4rem; background: #8882; }
   </style>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/github-dark.min.css">
+  <link rel="stylesheet" href="/_remote-preview/assets/v1/highlight.css">
 </head>
 <body>
   <nav aria-label="Breadcrumb">{{.Breadcrumb}}</nav>
@@ -115,20 +118,18 @@ var textTemplate = template.Must(template.New("text").Parse(`<!doctype html>
   <p><code>{{.RemotePath}}</code></p>
   <div class="toolbar"><a href="{{.RawURL}}">Raw</a></div>
   <pre><code id="source-code" class="language-{{.Language}}">{{.Source}}</code></pre>
+  <script src="/_remote-preview/assets/v1/highlight.js"></script>
   <script>
     const source = {{.SourceJSON}};
     const language = {{.LanguageJSON}};
     const sourceCode = document.getElementById('source-code');
     sourceCode.textContent = source;
-    if (language) {
-      import('https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/+esm')
-        .then((module) => module.default || module)
-        .then((hljs) => {
-          if (hljs.getLanguage(language)) {
-            sourceCode.innerHTML = hljs.highlight(source, { language }).value;
-          }
-        })
-        .catch(() => { sourceCode.textContent = source; });
+    if (language && window.hljs && window.hljs.getLanguage(language)) {
+      try {
+        sourceCode.innerHTML = window.hljs.highlight(source, { language }).value;
+      } catch (_) {
+        sourceCode.textContent = source;
+      }
     }
   </script>
 </body>
