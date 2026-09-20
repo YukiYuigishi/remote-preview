@@ -130,6 +130,24 @@ make check      # generate + test + race + vet + build
 make clean      # bin/のMakefile生成物を削除
 ```
 
+## CI / Release
+
+Pull requestとpushではGitHub Actionsが`make check`を実行します。
+
+`v*` tagをpushすると、Linux/Darwinのamd64/arm64向けCLI archiveと`SHA256SUMS`を含むGitHub Releaseを自動作成します。
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Release archiveをlocalで作成する場合:
+
+```bash
+make generate
+scripts/package-release.sh v0.1.0 dist
+```
+
 ## Project layout
 
 - `cmd/remote-preview`: CLI entrypoint only
@@ -139,7 +157,10 @@ make clean      # bin/のMakefile生成物を削除
 - `internal/preview/assets`: marked、Mermaid、highlight.js/CSSのversion固定asset
 - `internal/remotehelper`: helperのfilesystem traversalとbatch protocol writer
 - `scripts/generate-remote-helpers.sh`: helper artifactのcross buildと圧縮
+- `scripts/package-release.sh`: Linux/Darwin向けrelease archiveの作成
 - `Makefile`: build、test、verification command
+- `.github/workflows/ci.yml`: pull request / push時のCI
+- `.github/workflows/release.yml`: `v*` tag push時のGitHub Release
 - `THIRD_PARTY_NOTICES.md`: 同梱browser assetのversionとlicense
 - `issues/`: 実装scopeと検証結果
 

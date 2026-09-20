@@ -16,6 +16,7 @@
 - HTML fileは通常のfile linkから同一originの`text/html`として直接表示し、listen portが使用中なら後続の空きportへ自動でずらす。
 - Markdown、Mermaid、highlight.jsのbrowser assetはversion固定でbinaryへembedし、localhostから配信する。runtime CDN依存はない。
 - MakefileはIssue 011でbuild、helper生成、test、race、vet、check、cleanを再現する。
+- GitHub Actionsはpush/PRで`make check`を実行し、`v*` tagでLinux/Darwinの4 platform release archiveを公開する。
 
 ## Product decisions
 
