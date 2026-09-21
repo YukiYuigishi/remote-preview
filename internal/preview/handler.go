@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -15,9 +16,11 @@ import (
 )
 
 type handler struct {
-	target  remoteTarget
-	remote  RemoteFS
-	verbose bool
+	target       remoteTarget
+	remote       RemoteFS
+	transfer     transferFS
+	writeEnabled bool
+	verbose      bool
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -26,6 +29,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Debug("http request done", "method", r.Method, "uri", r.URL.RequestURI(), "duration", time.Since(started))
 	}()
 
+	if servePreviewAsset(w, r) {
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, transferURLPrefix) {
+		h.serveTransfer(w, r)
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -33,9 +43,6 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if h.verbose {
 		slog.Info("http request", "method", r.Method, "uri", r.URL.RequestURI())
-	}
-	if servePreviewAsset(w, r) {
-		return
 	}
 
 	rel := cleanRelativeURLPath(r.URL.Path)
@@ -77,10 +84,12 @@ func (h *handler) serveDirectory(w http.ResponseWriter, r *http.Request, rel, re
 	}
 
 	type viewEntry struct {
-		Name string
-		Href string
-		Icon string
-		Kind string
+		Name        string
+		Href        string
+		Icon        string
+		Kind        string
+		SelectPath  string
+		DownloadURL string
 	}
 	items := make([]viewEntry, 0, len(entries))
 	for _, entry := range entries {
@@ -103,23 +112,42 @@ func (h *handler) serveDirectory(w http.ResponseWriter, r *http.Request, rel, re
 		} else if isPlainText(entry.Name) {
 			kindLabel = "text"
 		}
-		items = append(items, viewEntry{Name: entry.Name, Href: href, Icon: icon, Kind: kindLabel})
+		selectPath, pathErr := joinTransferRelativePath(rel, entry.Name)
+		if pathErr != nil {
+			slog.Debug("skip entry with invalid transfer path", "name", entry.Name, "error", pathErr)
+			continue
+		}
+		downloadURL := transferURLPrefix + "download?path=" + url.QueryEscape(selectPath)
+		items = append(items, viewEntry{
+			Name:        entry.Name,
+			Href:        href,
+			Icon:        icon,
+			Kind:        kindLabel,
+			SelectPath:  selectPath,
+			DownloadURL: downloadURL,
+		})
 	}
 
 	data := struct {
-		Title      string
-		Host       string
-		RemotePath string
-		Breadcrumb template.HTML
-		Parent     string
-		Entries    []viewEntry
+		Title        string
+		Host         string
+		RemotePath   string
+		Breadcrumb   template.HTML
+		Parent       string
+		Entries      []viewEntry
+		CurrentPath  string
+		UploadURL    string
+		WriteEnabled bool
 	}{
-		Title:      directoryTitle(rel),
-		Host:       h.target.Host,
-		RemotePath: remotePath,
-		Breadcrumb: breadcrumbHTML(r.URL.EscapedPath(), true),
-		Parent:     parentURL(r.URL.EscapedPath()),
-		Entries:    items,
+		Title:        directoryTitle(rel),
+		Host:         h.target.Host,
+		RemotePath:   remotePath,
+		Breadcrumb:   breadcrumbHTML(r.URL.EscapedPath(), true),
+		Parent:       parentURL(r.URL.EscapedPath()),
+		Entries:      items,
+		CurrentPath:  rel,
+		UploadURL:    transferURLPrefix + "upload?directory=" + url.QueryEscape(rel),
+		WriteEnabled: h.writeEnabled,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

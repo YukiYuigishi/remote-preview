@@ -54,7 +54,7 @@ Webファイラーからファイルを個別または複数選択でダウン�
 - local targetではOS filesystemへ、remote targetではSSH経由で同じupload操作を実行できる。
 - upload先の親directoryを必要に応じて作成し、転送途中の中途半端なdestination fileを通常の一覧から見せない。
 - 同名destination fileの上書き、skip、エラーの方針がUI・README・テストで一貫している。
-- 同一内容の再uploadを可能な範囲でskipし、転送失敗後の再実行で既存の正常なファイルを壊さない。
+- remote metadata/hashが利用できる場合の同一内容skip、または利用できない場合のfull-file fallbackを選択し、転送失敗後の再実行で既存の正常なファイルを壊さない。
 - write opt-inがない起動ではupload UIまたはupload endpointが無効化され、既存のread-only利用が維持される。
 - upload/downloadの全path入力について、target root外へのpath traversal、意図しないsymlink経由の書き込み、HTTP methodの悪用を防ぐ。
 - request contextのcancel、サイズ上限、timeout、SSH error、archive/upload中の部分失敗をテストする。
@@ -67,7 +67,7 @@ Webファイラーからファイルを個別または複数選択でダウン�
 - ZIP entry名とupload relative pathはtarget rootからの相対pathに限定し、空segment、`.`、`..`、NUL、OS依存のseparatorを正規化・拒否する。
 - remote uploadの実装は、まず既存のsystem `ssh` / remote helperを活用する。remote hostに`rsync`のインストールを要求しない。
 - rsync風の差分判定に必要なremote metadataが不足する場合は、正確性を優先してfull-file transferへfallbackする。hash計算やdelta block transferは、初回実装の必須条件にしない。
-- 書き込みを許可するCLI flag名、上書きの既定値、転送の同時実行数は実装時に固定し、READMEとissueへ記録する。初期の推奨値はwrite opt-in、上書き前の明示確認、bounded concurrencyとする。
+- 書き込みflagは`-write`、上書きはbrowserの確認後に通常fileだけをatomic replace、転送の同時実行数はbrowserからの1 request内で逐次処理とした。remote metadata/hashがない場合はfull-file transferへfallbackする。
 
 ## Verification
 
@@ -85,6 +85,32 @@ Webファイラーからファイルを個別または複数選択でダウン�
 
 ## Current state / blocker
 
-- 未着手。
-- 現在の`RemoteFS`は`Kind`、`List`、`Read`のみを公開し、`Read`も`[]byte`を返すため、streaming downloadとwrite用の別 abstractionが必要。
-- 現在のREADMEと製品方針はread-only前提。実装開始時にwrite opt-inのCLI flag、overwrite policy、symlink policyを確定し、READMEへ反映する。
+- 実装完了。
+- `transferFS`を`RemoteFS`から分離し、local backendはstreaming read、atomic temp file + rename、親directory作成を実装した。
+- SSH backendはsystem `ssh`のstdin/stdout streamingとremote側temp file + renameを利用し、remoteにrsyncやdaemonを要求しない。
+- `-write`を明示した起動だけuploadを有効にする。通常fileは確認後に置換し、symbolic link・directory宛ては拒否する。upload requestの上限は512 MiB。
+- UIはfile picker、directory picker、drag & drop、個別download、選択ZIP downloadに対応した。directory upload/dropではrelative pathを保持する。
+- rsyncのdelta block転送や同一内容skipは未実装。remote metadata/hashが不足する場合のfull-file fallbackとして扱い、今後の最適化候補に残す。
+
+## Changed files
+
+- `internal/preview/transfer.go`
+- `internal/preview/handler_transfer.go`
+- `internal/preview/handler.go`
+- `internal/preview/templates.go`
+- `internal/preview/local.go`
+- `internal/preview/remote.go`
+- `internal/preview/cache.go`
+- `internal/preview/main.go`
+- `internal/preview/transfer_test.go`
+- `internal/preview/main_test.go`
+- `README.md`
+- `PLAN.md`
+- `issues/025-download-upload-transfers.md`
+
+## Verification results
+
+- `go test ./...`: passed
+- `go test -race ./...`: passed
+- `go vet ./...`: passed
+- `go build ./...`: passed

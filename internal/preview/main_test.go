@@ -44,6 +44,24 @@ func TestCLIOptionsOpenByDefault(t *testing.T) {
 	}
 }
 
+func TestCLIOptionsWriteIsOptIn(t *testing.T) {
+	options := newCLIOptions("ykview")
+	if err := options.flags.Parse(nil); err != nil {
+		t.Fatal(err)
+	}
+	if *options.write {
+		t.Fatal("expected uploads to be disabled by default")
+	}
+
+	options = newCLIOptions("ykview")
+	if err := options.flags.Parse([]string{"-write"}); err != nil {
+		t.Fatal(err)
+	}
+	if !*options.write {
+		t.Fatal("expected -write to enable uploads")
+	}
+}
+
 func TestParseTarget(t *testing.T) {
 	got, err := parseTarget("remote-host:/remote/path")
 	if err != nil {

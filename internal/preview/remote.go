@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -177,6 +178,30 @@ func (s *sshRemoteFS) Read(ctx context.Context, remotePath string) ([]byte, erro
 	return s.runNamed(ctx, "read", remotePath, "sh", "-c", script, "sh", remotePath)
 }
 
+func (s *sshRemoteFS) Open(ctx context.Context, remotePath string) (io.ReadCloser, transferInfo, error) {
+	script := `p=$1; exec cat -- "$p"`
+	stream, err := s.openNamed(ctx, "download", remotePath, "sh", "-c", script, "sh", remotePath)
+	if err != nil {
+		return nil, transferInfo{}, err
+	}
+	return stream, transferInfo{Kind: "file", Size: -1}, nil
+}
+
+func (s *sshRemoteFS) MkdirAll(ctx context.Context, remotePath string) error {
+	_, err := s.runNamed(ctx, "mkdir", remotePath, "sh", "-c", remoteTransferMkdirScript, "sh", remotePath)
+	return err
+}
+
+func (s *sshRemoteFS) WriteFile(ctx context.Context, remotePath string, src io.Reader) error {
+	nonceBytes := make([]byte, 16)
+	if _, err := cryptorand.Read(nonceBytes); err != nil {
+		return fmt.Errorf("generate upload name: %w", err)
+	}
+	nonce := hex.EncodeToString(nonceBytes)
+	_, err := s.runNamedReader(ctx, "upload", remotePath, src, false, "sh", "-c", remoteTransferUploadScript, "sh", remotePath, nonce)
+	return err
+}
+
 func (s *sshRemoteFS) List(ctx context.Context, remotePath string) ([]remoteEntry, error) {
 	// This is the single-directory fallback for batch listing failures. Its
 	// line-oriented output keeps the fallback simple; the normal SSH path uses
@@ -320,6 +345,61 @@ chmod 700 "$temp"
 mv "$temp" "$path"
 trap - EXIT HUP INT TERM
 printf '%s' "$path"
+`
+
+const remoteTransferPathCheckScript = `
+check_path() {
+  target=$1
+  case "$target" in
+    /*) ;;
+    *) printf '%s\n' 'upload path must be absolute' >&2; exit 1 ;;
+  esac
+  remaining=${target#/}
+  current=/
+  while [ -n "$remaining" ]; do
+    case "$remaining" in
+      */*) segment=${remaining%%/*}; remaining=${remaining#*/} ;;
+      *) segment=$remaining; remaining= ;;
+    esac
+    if [ "$current" = / ]; then current="/$segment"; else current="$current/$segment"; fi
+    if [ -L "$current" ]; then
+      printf '%s\n' 'refusing to follow a symbolic link in upload path' >&2
+      exit 1
+    fi
+  done
+}
+`
+
+const remoteTransferMkdirScript = `set -eu
+` + remoteTransferPathCheckScript + `
+target=$1
+check_path "$target"
+mkdir -p "$target"
+`
+
+const remoteTransferUploadScript = `set -eu
+` + remoteTransferPathCheckScript + `
+destination=$1
+nonce=$2
+check_path "$destination"
+if [ -L "$destination" ]; then
+  printf '%s\n' 'refusing to overwrite a symbolic link' >&2
+  exit 1
+fi
+if [ -e "$destination" ] && [ ! -f "$destination" ]; then
+  printf '%s\n' 'upload destination is not a regular file' >&2
+  exit 1
+fi
+parent=${destination%/*}
+if [ -z "$parent" ]; then
+  parent=/
+fi
+temporary="$parent/.ykview-upload-$nonce"
+umask 077
+trap 'rm -f "$temporary"' EXIT HUP INT TERM
+cat > "$temporary"
+mv "$temporary" "$destination"
+trap - EXIT HUP INT TERM
 `
 
 const remoteHelperProbeScript = `set -eu
@@ -637,49 +717,28 @@ func (s *sshRemoteFS) runNamedInput(ctx context.Context, operation, remotePath s
 }
 
 func (s *sshRemoteFS) runNamedInputWithCompression(ctx context.Context, operation, remotePath string, input []byte, compression bool, args ...string) ([]byte, error) {
-	started := time.Now()
-	commandTimeout := s.commandTimeout
-	if commandTimeout <= 0 {
-		commandTimeout = 30 * time.Second
-	}
-	connectTimeout := s.connectTimeout
-	if connectTimeout <= 0 {
-		connectTimeout = commandTimeout
-	}
-
-	runCtx, cancel := context.WithTimeout(ctx, commandTimeout)
-	defer cancel()
-	slog.Debug("ssh command start", "host", s.host, "operation", operation, "remote_path", remotePath, "timeout", commandTimeout, "input_bytes", len(input), "compression", compression)
-
-	sshArgs := []string{"-T"}
-	if compression {
-		sshArgs = append(sshArgs, "-C")
-	}
-	sshArgs = append(sshArgs,
-		"-o", "BatchMode=yes",
-		"-o", "ConnectTimeout="+sshTimeoutSeconds(connectTimeout),
-	)
-	s.transportMu.Lock()
-	controlPath := s.controlPath
-	s.transportMu.Unlock()
-	if controlPath != "" {
-		sshArgs = append(sshArgs,
-			"-o", "ControlMaster=auto",
-			"-o", "Compression=yes",
-			"-o", "ControlPersist="+controlPersist,
-			"-o", "ControlPath="+controlPath,
-		)
-	}
-	sshArgs = append(sshArgs, s.host)
-	sshArgs = append(sshArgs, shellJoin(args...))
-
-	command := s.command
-	if command == nil {
-		command = exec.CommandContext
-	}
-	cmd := command(runCtx, "ssh", sshArgs...)
+	var reader io.Reader
 	if input != nil {
-		cmd.Stdin = bytes.NewReader(input)
+		reader = bytes.NewReader(input)
+	}
+	return s.runNamedReaderWithCompression(ctx, operation, remotePath, reader, compression, args...)
+}
+
+func (s *sshRemoteFS) runNamedReader(ctx context.Context, operation, remotePath string, input io.Reader, compression bool, args ...string) ([]byte, error) {
+	return s.runNamedReaderWithCompression(ctx, operation, remotePath, input, compression, args...)
+}
+
+func (s *sshRemoteFS) runNamedReaderWithCompression(ctx context.Context, operation, remotePath string, input io.Reader, compression bool, args ...string) ([]byte, error) {
+	started := time.Now()
+	cmd, runCtx, cancel := s.newSSHCommand(ctx, compression, args...)
+	defer cancel()
+	inputBytes := 0
+	if input != nil {
+		inputBytes = -1
+	}
+	slog.Debug("ssh command start", "host", s.host, "operation", operation, "remote_path", remotePath, "timeout", s.commandTimeout, "input_bytes", inputBytes, "compression", compression)
+	if input != nil {
+		cmd.Stdin = input
 	}
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
@@ -700,6 +759,125 @@ func (s *sshRemoteFS) runNamedInputWithCompression(ctx context.Context, operatio
 	}
 	slog.Debug("ssh command done", "host", s.host, "operation", operation, "remote_path", remotePath, "duration", time.Since(started), "bytes", len(out))
 	return out, nil
+}
+
+func (s *sshRemoteFS) newSSHCommand(ctx context.Context, compression bool, args ...string) (*exec.Cmd, context.Context, context.CancelFunc) {
+	commandTimeout := s.commandTimeout
+	if commandTimeout <= 0 {
+		commandTimeout = 30 * time.Second
+	}
+	connectTimeout := s.connectTimeout
+	if connectTimeout <= 0 {
+		connectTimeout = commandTimeout
+	}
+	runCtx, cancel := context.WithTimeout(ctx, commandTimeout)
+
+	sshArgs := []string{"-T"}
+	if compression {
+		sshArgs = append(sshArgs, "-C")
+	}
+	sshArgs = append(sshArgs,
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout="+sshTimeoutSeconds(connectTimeout),
+	)
+	s.transportMu.Lock()
+	controlPath := s.controlPath
+	s.transportMu.Unlock()
+	if controlPath != "" {
+		sshArgs = append(sshArgs,
+			"-o", "ControlMaster=auto",
+			"-o", "Compression=yes",
+			"-o", "ControlPersist="+controlPersist,
+			"-o", "ControlPath="+controlPath,
+		)
+	}
+	sshArgs = append(sshArgs, s.host, shellJoin(args...))
+	command := s.command
+	if command == nil {
+		command = exec.CommandContext
+	}
+	return command(runCtx, "ssh", sshArgs...), runCtx, cancel
+}
+
+func (s *sshRemoteFS) openNamed(ctx context.Context, operation, remotePath string, args ...string) (io.ReadCloser, error) {
+	started := time.Now()
+	cmd, runCtx, cancel := s.newSSHCommand(ctx, false, args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		cancel()
+		_ = stdout.Close()
+		return nil, err
+	}
+	slog.Debug("ssh stream start", "host", s.host, "operation", operation, "remote_path", remotePath, "timeout", s.commandTimeout)
+	return &sshStreamReadCloser{
+		stdout:     stdout,
+		cmd:        cmd,
+		runCtx:     runCtx,
+		cancel:     cancel,
+		stderr:     &stderr,
+		host:       s.host,
+		operation:  operation,
+		remotePath: remotePath,
+		started:    started,
+	}, nil
+}
+
+type sshStreamReadCloser struct {
+	stdout     io.ReadCloser
+	cmd        *exec.Cmd
+	runCtx     context.Context
+	cancel     context.CancelFunc
+	stderr     *strings.Builder
+	host       string
+	operation  string
+	remotePath string
+	started    time.Time
+	waitOnce   sync.Once
+	waitErr    error
+}
+
+func (s *sshStreamReadCloser) Read(p []byte) (int, error) {
+	read, err := s.stdout.Read(p)
+	if err != io.EOF {
+		return read, err
+	}
+	if waitErr := s.wait(); waitErr != nil {
+		return read, waitErr
+	}
+	return read, io.EOF
+}
+
+func (s *sshStreamReadCloser) Close() error {
+	_ = s.stdout.Close()
+	s.cancel()
+	return s.wait()
+}
+
+func (s *sshStreamReadCloser) wait() error {
+	s.waitOnce.Do(func() {
+		err := s.cmd.Wait()
+		contextErr := s.runCtx.Err()
+		s.cancel()
+		if err != nil {
+			if contextErr != nil {
+				s.waitErr = fmt.Errorf("ssh %s: %w", s.host, contextErr)
+			} else {
+				message := strings.TrimSpace(s.stderr.String())
+				if message == "" {
+					message = err.Error()
+				}
+				s.waitErr = fmt.Errorf("ssh %s: %s", s.host, message)
+			}
+		}
+		slog.Debug("ssh stream done", "host", s.host, "operation", s.operation, "remote_path", s.remotePath, "duration", time.Since(s.started), "error", s.waitErr)
+	})
+	return s.waitErr
 }
 
 func sshTimeoutSeconds(timeout time.Duration) string {
