@@ -14,6 +14,10 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ["1.23.x", "1.26.x"]
     env:
       CGO_ENABLED: 1
 
@@ -24,16 +28,15 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          cache: true
+          go-version: ${{ matrix.go-version }}
 
       - name: Cache Go build artifacts
         uses: actions/cache@v4
         with:
           path: ~/.cache/go-build
-          key: ${{ runner.os }}-go-build-${{ hashFiles('go.mod', 'go.sum') }}
+          key: ${{ runner.os }}-go-${{ matrix.go-version }}-build-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-go-build-
+            ${{ runner.os }}-go-${{ matrix.go-version }}-build-
 
       - name: Verify generated helper artifacts are committed
         run: git diff --exit-code -- internal/preview/remote_helpers
@@ -51,7 +54,9 @@ jobs:
         run: go build ./...
 
       - name: Dead-code analysis
-        run: go run golang.org/x/tools/cmd/deadcode@latest ./...
+        if: matrix.go-version == '1.26.x'
+        run: go run golang.org/x/tools/cmd/deadcode@v0.50.0 ./...
 
       - name: Staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@latest -tests=false ./...
+        if: matrix.go-version == '1.26.x'
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 -tests=false ./...
