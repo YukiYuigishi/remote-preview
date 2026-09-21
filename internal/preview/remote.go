@@ -83,7 +83,7 @@ func newSSHRemoteFS(host string) *sshRemoteFS {
 	}
 }
 
-const controlPersist = "30s"
+const controlPersist = "5m"
 
 // enableConnectionSharing opts this backend into a process-local OpenSSH
 // ControlMaster. It is deliberately separate from newSSHRemoteFS so tests and
@@ -115,6 +115,39 @@ func (s *sshRemoteFS) enableConnectionSharing() {
 
 	s.controlDir = dir
 	s.controlPath = filepath.Join(dir, "control")
+
+	commandTimeout := s.commandTimeout
+	if commandTimeout <= 0 {
+		commandTimeout = 30 * time.Second
+	}
+	connectTimeout := s.connectTimeout
+	if connectTimeout <= 0 {
+		connectTimeout = commandTimeout
+	}
+	startCtx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	command := s.command
+	if command == nil {
+		command = exec.CommandContext
+	}
+	cmd := command(startCtx, "ssh",
+		"-M", "-N", "-f",
+		"-o", "BatchMode=yes",
+		"-o", "Compression=yes",
+		"-o", "ConnectTimeout="+sshTimeoutSeconds(connectTimeout),
+		"-o", "ControlPersist="+controlPersist,
+		"-o", "ControlPath="+s.controlPath,
+		s.host,
+	)
+	if err := cmd.Run(); err != nil {
+		controlPath := s.controlPath
+		controlDir := s.controlDir
+		s.controlPath = ""
+		s.controlDir = ""
+		_ = os.Remove(controlPath)
+		_ = os.Remove(controlDir)
+		slog.Debug("remote transport connection sharing start failed", "host", s.host, "error", err)
+	}
 }
 
 func (s *sshRemoteFS) Home(ctx context.Context) (string, error) {
@@ -658,6 +691,7 @@ func (s *sshRemoteFS) runNamedInputWithCompression(ctx context.Context, operatio
 	if controlPath != "" {
 		sshArgs = append(sshArgs,
 			"-o", "ControlMaster=auto",
+			"-o", "Compression=yes",
 			"-o", "ControlPersist="+controlPersist,
 			"-o", "ControlPath="+controlPath,
 		)
