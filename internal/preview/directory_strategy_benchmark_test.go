@@ -311,12 +311,24 @@ func listDirectoryBenchmarkPath(ctx context.Context, remote RemoteFS, remotePath
 
 func prefetchDirectoryBenchmarkChildren(ctx context.Context, remote RemoteFS, children []string) error {
 	errs := make(chan error, len(children))
+	// The original eager-prefetch implementation allowed at most four remote
+	// listings at once. Keep that bound here so a wide fixture models multiple
+	// waves of SSH work instead of an unrealistically unlimited fan-out.
+	const concurrency = 4
+	sem := make(chan struct{}, concurrency)
 	var group sync.WaitGroup
 	group.Add(len(children))
 	for _, childPath := range children {
 		childPath := childPath
 		go func() {
 			defer group.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				errs <- ctx.Err()
+				return
+			}
+			defer func() { <-sem }()
 			errs <- listDirectoryBenchmarkPath(ctx, remote, childPath)
 		}()
 	}
