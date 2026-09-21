@@ -2,7 +2,6 @@ package preview
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"net"
 	"path/filepath"
@@ -67,7 +66,7 @@ func TestParseTargetAcceptsRemoteHomeRelativePath(t *testing.T) {
 	}
 }
 
-func TestResolveTargetHomeRelativePath(t *testing.T) {
+func TestSetResolvedHomeHomeRelativePath(t *testing.T) {
 	for input, want := range map[string]string{
 		"remote-host:~":            "/remote/home",
 		"remote-host:~/docs":       "/remote/home/docs",
@@ -78,12 +77,9 @@ func TestResolveTargetHomeRelativePath(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resolved, err := resolveTarget(context.Background(), target, &fakeRemoteFS{home: "/remote/home"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if resolved.Root != want || resolved.Home {
-			t.Fatalf("resolveTarget(%q)=%#v, want root %q", input, resolved, want)
+		target.setResolvedHome("/remote/home")
+		if target.Root != want || target.Home {
+			t.Fatalf("setResolvedHome(%q)=%#v, want root %q", input, target, want)
 		}
 	}
 }
@@ -131,17 +127,14 @@ func TestParseTargetHostShorthand(t *testing.T) {
 	}
 }
 
-func TestResolveTargetHome(t *testing.T) {
+func TestSetResolvedHome(t *testing.T) {
 	target, err := parseTarget("remote-host")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := resolveTarget(context.Background(), target, &fakeRemoteFS{home: "/remote/home"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved.Root != "/remote/home" || resolved.Home {
-		t.Fatalf("unexpected resolved target: %#v", resolved)
+	target.setResolvedHome("/remote/home")
+	if target.Root != "/remote/home" || target.Home {
+		t.Fatalf("unexpected resolved target: %#v", target)
 	}
 }
 

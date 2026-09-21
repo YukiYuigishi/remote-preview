@@ -25,7 +25,7 @@ func TestSSHRemoteFSAddsConnectionTimeout(t *testing.T) {
 		return exec.CommandContext(ctx, "sh", "-c", "printf ok")
 	}
 
-	out, err := remote.run(context.Background(), "sh", "-c", "true")
+	out, err := remote.runNamed(context.Background(), "command", "", "sh", "-c", "true")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestSSHRemoteFSConnectionSharingAddsOptionsAndCleansUp(t *testing.T) {
 		}
 	}
 
-	if _, err := remote.run(context.Background(), "true"); err != nil {
+	if _, err := remote.runNamed(context.Background(), "command", "", "true"); err != nil {
 		t.Fatal(err)
 	}
 	if len(calls) != 2 {
@@ -122,7 +122,7 @@ func TestSSHRemoteFSConnectionSharingSetupFailureFallsBack(t *testing.T) {
 	if remote.controlDir != "" || remote.controlPath != "" {
 		t.Fatal("connection sharing should be disabled after setup failure")
 	}
-	if out, err := remote.run(context.Background(), "true"); err != nil || string(out) != "ok" {
+	if out, err := remote.runNamed(context.Background(), "command", "", "true"); err != nil || string(out) != "ok" {
 		t.Fatalf("run output=%q error=%v", out, err)
 	}
 	for _, arg := range commandArgs {
@@ -159,7 +159,7 @@ func TestSSHRemoteFSConnectionSharingStartFailureFallsBack(t *testing.T) {
 	if _, err := os.Stat(controlDir); !os.IsNotExist(err) {
 		t.Fatalf("failed master control directory still exists or stat failed: %v", err)
 	}
-	if out, err := remote.run(context.Background(), "true"); err != nil || string(out) != "ok" {
+	if out, err := remote.runNamed(context.Background(), "command", "", "true"); err != nil || string(out) != "ok" {
 		t.Fatalf("fallback run output=%q error=%v", out, err)
 	}
 	for _, arg := range fallbackArgs {
@@ -225,7 +225,7 @@ func TestSSHRemoteFSCancelStopsCommand(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := remote.run(ctx, "sh", "-c", "sleep 30")
+		_, err := remote.runNamed(ctx, "command", "", "sh", "-c", "sleep 30")
 		done <- err
 	}()
 	time.Sleep(30 * time.Millisecond)
@@ -246,7 +246,7 @@ func TestSSHRemoteFSCommandTimeout(t *testing.T) {
 	remote.commandTimeout = 30 * time.Millisecond
 	remote.command = blockingCommand
 
-	_, err := remote.run(context.Background(), "sh", "-c", "sleep 30")
+	_, err := remote.runNamed(context.Background(), "command", "", "sh", "-c", "sleep 30")
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("error=%v, want deadline exceeded", err)
 	}
@@ -284,39 +284,9 @@ func TestSSHRemoteFSCommandFactoryCanBeReplaced(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
-	_, err := remote.run(ctx, "true")
+	_, err := remote.runNamed(ctx, "command", "", "true")
 	if !strings.Contains(err.Error(), "context deadline exceeded") {
 		t.Fatalf("error=%v, want context deadline exceeded", err)
-	}
-}
-
-func TestRemoteHelperPlatform(t *testing.T) {
-	tests := []struct {
-		name   string
-		goos   string
-		arch   string
-		want   string
-		wantOK bool
-	}{
-		{name: "linux amd64", goos: "Linux", arch: "x86_64", want: "linux/amd64", wantOK: true},
-		{name: "linux arm64", goos: "Linux", arch: "aarch64", want: "linux/arm64", wantOK: true},
-		{name: "darwin amd64", goos: "Darwin", arch: "x86_64", want: "darwin/amd64", wantOK: true},
-		{name: "darwin arm64", goos: "Darwin", arch: "arm64", want: "darwin/arm64", wantOK: true},
-		{name: "unsupported", goos: "FreeBSD", arch: "amd64", wantOK: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := remoteHelperPlatform(tt.goos, tt.arch)
-			if tt.wantOK {
-				if err != nil || got != tt.want {
-					t.Fatalf("platform=%q error=%v, want %q", got, err, tt.want)
-				}
-				return
-			}
-			if err == nil {
-				t.Fatalf("platform=%q, want unsupported error", got)
-			}
-		})
 	}
 }
 
