@@ -7,6 +7,7 @@
 - Phase 1–4（責務分割、target改善、context-aware system SSH、portable batch/on-demand directory listing cache）を実装済み。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...` は成功している。
 - 次の主要課題は、ファイル全量読み込みとpreview fallback/HTTP品質（Phase 5）。転送機能はIssue 025で別スコープとして追加する。
+- Issue 025のdownload/upload transferは実装済み。`-write` opt-in、個別/ZIP download、file/directory uploadを提供し、rsyncのdelta転送は未実装のfull-file fallbackとする。
 - `cmd/ykview`は薄いentrypointで、アプリケーション実装は`internal/preview`に配置されている。
 - directory listingはforegroundで取得し、必要に応じてportable batch commandで直下分も同じSSHにまとめ、TTL cacheとsingleflightで再利用する。
 - debug logは標準ライブラリの`log/slog`でHTTP、cache、batch、SSHの処理境界を追跡できる。
@@ -146,6 +147,7 @@ Acceptance criteria:
 - Integration: fake SSH executableまたはtest transportによる引数・context・stderr処理。
 - Regression: `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...`。
 - Manual: home target、ProxyJump/alias、特殊ファイル名、巨大ファイル、CDN/Mermaid失敗。
+- Transfer: individual/ZIP download、write opt-in、local/remote upload、directory drop、path traversal、partial file防止。
 
 ## Candidate implementation issues
 

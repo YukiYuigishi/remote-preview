@@ -2,6 +2,8 @@ package preview
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"path"
 	"sync"
@@ -158,6 +160,12 @@ func (c *listingCache) peek(remotePath string) ([]remoteEntry, bool) {
 	return cloneRemoteEntries(entry.entries), true
 }
 
+func (c *listingCache) invalidate(remotePath string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, c.key(remotePath))
+}
+
 func (c *listingCache) evictIfNeeded() {
 	for len(c.entries) > c.max {
 		var oldestKey string
@@ -253,6 +261,34 @@ func (c *cachedRemoteFS) storeBatch(remotePath string, result batchListingResult
 
 func (c *cachedRemoteFS) Read(ctx context.Context, remotePath string) ([]byte, error) {
 	return c.backend.Read(ctx, remotePath)
+}
+
+func (c *cachedRemoteFS) Open(ctx context.Context, remotePath string) (io.ReadCloser, transferInfo, error) {
+	backend, ok := c.backend.(transferFS)
+	if !ok {
+		return nil, transferInfo{}, fmt.Errorf("transfer backend is unavailable")
+	}
+	return backend.Open(ctx, remotePath)
+}
+
+func (c *cachedRemoteFS) MkdirAll(ctx context.Context, remotePath string) error {
+	backend, ok := c.backend.(transferFS)
+	if !ok {
+		return fmt.Errorf("transfer backend is unavailable")
+	}
+	return backend.MkdirAll(ctx, remotePath)
+}
+
+func (c *cachedRemoteFS) WriteFile(ctx context.Context, remotePath string, src io.Reader) error {
+	backend, ok := c.backend.(transferFS)
+	if !ok {
+		return fmt.Errorf("transfer backend is unavailable")
+	}
+	return backend.WriteFile(ctx, remotePath, src)
+}
+
+func (c *cachedRemoteFS) Invalidate(remotePath string) {
+	c.cache.invalidate(remotePath)
 }
 
 func cloneRemoteEntries(entries []remoteEntry) []remoteEntry {

@@ -21,6 +21,7 @@ type cliOptions struct {
 	flags    *flag.FlagSet
 	addr     *string
 	openPage *bool
+	write    *bool
 	verbose  *bool
 }
 
@@ -29,12 +30,13 @@ func newCLIOptions(program string) *cliOptions {
 	flags.SetOutput(os.Stderr)
 	addr := flags.String("addr", "127.0.0.1:8080", "listen address")
 	openPage := flags.Bool("open", true, "open the file browser in the default browser (use -open=false to disable)")
+	write := flags.Bool("write", false, "enable file uploads (disabled by default)")
 	verbose := flags.Bool("v", false, "log each request")
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), "Usage: %s [options] target\n\n", filepath.Base(program))
 		flags.PrintDefaults()
 	}
-	return &cliOptions{flags: flags, addr: addr, openPage: openPage, verbose: verbose}
+	return &cliOptions{flags: flags, addr: addr, openPage: openPage, write: write, verbose: verbose}
 }
 
 func Run(args []string, program string) error {
@@ -87,7 +89,7 @@ func Run(args []string, program string) error {
 	}
 
 	remote := newCachedRemoteFS(backend, target.Host)
-	h := &handler{target: target, remote: remote, verbose: *options.verbose}
+	h := &handler{target: target, remote: remote, transfer: remote, writeEnabled: *options.write, verbose: *options.verbose}
 	srv := &http.Server{
 		Handler:           h,
 		ReadHeaderTimeout: 5 * time.Second,

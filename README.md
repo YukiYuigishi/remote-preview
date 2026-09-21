@@ -1,6 +1,6 @@
 # ykview
 
-SSH先のディレクトリを、ローカルブラウザから **read-only Webファイラー** として閲覧する小さなCLIです。
+SSH先またはlocal filesystemを、ローカルブラウザから閲覧・downloadできるWebファイラーです。`-write`を明示した場合だけ、表示中のdirectoryへfile/directory uploadもできます。
 
 リモート側にHTTPサーバや恒久的なagentを入れず、system `ssh` で必要な処理だけを実行します。directory batch listingでは、対応platform向けのGo helperをremote `TMPDIR`配下へversion/hash付きで配置し、次回以降も再利用します。
 
@@ -31,10 +31,13 @@ SSH先のディレクトリを、ローカルブラウザから **read-only Web�
 - source code / JSON / YAML / textなど: browser内text viewer
 - 対応するsource codeは同梱のhighlight.jsでsyntax highlight
 - `Raw` 表示
+- ファイル単位のdownload、複数選択したfile/directoryのZIP download
+- `-write` opt-in時のfile picker / directory picker / drag & drop upload
+- local/remoteでのrelative path保持、atomic upload、symlink宛て書き込み拒否
 - directory listingのTTL cacheと同時アクセスの重複抑制
 - macOS / BusyBox互換のforeground batch listing
 - SSH command/connect timeoutとrequest context cancellation
-- read-only
+- read-only（既定。uploadは`-write`指定時だけ有効）
 
 ## Quick start (macOS Apple Silicon)
 
@@ -170,6 +173,14 @@ scripts/package-release.sh v0.1.0 dist
 ./bin/ykview [options] target
 ```
 
+uploadを有効にする場合:
+
+```bash
+./bin/ykview -write remote-host:/remote/path
+```
+
+`-write`は既定で無効です。uploadは表示中のdirectoryを対象にし、通常fileの同名置換は一時fileからのatomic renameで行います。symbolic linkやdirectoryを上書きせず、1回のupload requestは512 MiBまでです。
+
 local filesystemを表示する場合:
 
 ```bash
@@ -250,7 +261,8 @@ Remote filesystem
 - batch listingのprotocolはtab/newlineを含むfilenameを保持する。single-directory shell fallbackではnewlineを含むfilenameを完全には扱えない
 - Range request未対応
 - live reload未対応
-- file edit / upload / rename / deleteは未対応
+- file edit / rename / deleteは未対応
+- rsyncのremote依存やdelta block転送は行わず、uploadは必要に応じてfull-file transferへfallbackする
 - HTML/SVGはread-only用途の同一origin上で直接表示するため、信頼できるremote fileだけを開く
 - Markdown / Mermaid / syntax highlightのbrowser assetを同梱するため、binary sizeが増える
 - SSH URI形式やIPv6 literalのtarget parserは未対応
