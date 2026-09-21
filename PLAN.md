@@ -12,6 +12,7 @@
 - debug logは標準ライブラリの`log/slog`でHTTP、cache、batch、SSHの処理境界を追跡できる。
 - remote-side Go helperはIssue 010/015で実装済み。remote `TMPDIR`のversion/hash付きcacheを再利用し、既存shell batchをfallbackとして維持する。
 - helper cache miss時のbinary uploadはSSH compressionを使い、失敗時はraw uploadへfallbackする。
+- remote accessはprocess-localなOpenSSH ControlMasterを自動的に使い、helper probe、listing、file read間で同じtransport connectionを再利用する。setup失敗時は通常の独立SSHへfallbackする。
 - text-like fileはbrowser内viewerへ送り、対応source codeは同梱したbrowser-side highlight.jsでsyntax highlightを利用する。assetやrich renderingに失敗した場合はplain text/sourceへfallbackする。
 - HTML fileは通常のfile linkから同一originの`text/html`として直接表示し、listen portが使用中なら後続の空きportへ自動でずらす。
 - Markdown、Mermaid、highlight.jsのbrowser assetはversion固定でbinaryへembedし、localhostから配信する。runtime CDN依存はない。
@@ -28,7 +29,7 @@
 - ブラウザは起動時にデフォルトで開く。自動起動を無効にする場合は`-open=false`を指定する。local listen address (`-addr`) と remote target は別概念として扱う。
 - `~` や相対パスをローカル側で推測せず、リモート側でホームを解決する。
 - シンボリックリンクによるroot外参照は、個人向けread-onlyツールとしては最優先の阻害要因にしない。ただし挙動を明文化し、将来strict root confinementを追加できる構造にする。
-- system `ssh` は `~/.ssh/config`、Host alias、ProxyJump、ssh-agent、ControlMasterを利用できる強みがあるため、Go SSHへ即時置換しない。
+- system `ssh` は `~/.ssh/config`、Host alias、ProxyJump、ssh-agentとControlMasterによる接続再利用を利用できる強みがあるため、Go SSHへ即時置換しない。
 
 ## Implementation phases
 

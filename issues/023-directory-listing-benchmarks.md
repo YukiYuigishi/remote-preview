@@ -39,4 +39,12 @@
 
 ## Current state / blocker
 
-- 調査開始。実SSH hostが利用できない場合は、latency注入可能なfake transportとlocal filesystem fixtureで比較し、実network未計測であることを結果へ明記する。
+- 完了。専用SSH benchmark host上に一時fixtureを作り、各方式をwarmup後5回測定した。一時fixtureとlocal artifactは測定後に削除した。
+- fresh SSH invocationのp50は、small fixtureでsingle current 316.748ms、shell batch 368.227ms、Go helper batch 311.950msだった。
+- medium fixture（16 child × 100 files）ではsingle 354.695ms、shell batch 2,065.933ms、Go helper batch 311.288msだった。
+- wide fixture（64 child × 20 files、batchは先頭16 child）ではsingle 430.115ms、shell batch 841.238ms、Go helper batch 304.580msだった。helperとshellは同じentry数・protocol bytesを処理した。
+- SSH command単体をwarmup後12回測定すると、独立接続はp50 309.8ms、ControlMaster再利用後のsession channelはp50 9.8msだった。連続2 commandは601.5msから313.8ms、連続3 commandは913.3msから323.0msへ短縮した。
+- latency注入benchmarkを追加し、single on-demandはfirst/one child/sequentialで1/2/最大17 SSH calls、foreground batchはすべて1 call、旧prefetchは最大17 callsになることを固定した。旧prefetchの同時実行数は当時と同じ4に制限した。
+- 採用方式は、Go helperによるforeground batch、TTL cache、singleflightを維持し、process-localなOpenSSH ControlMasterを追加してcommand間でtransportを再利用する方式とした。旧parallel prefetchは採用しない。helper unavailable時のshell/single fallbackは維持する。
+- SSH benchmark hostのHTTP smoke testでは、helper cache hit時の初回表示が719.9msから120.7msへ短縮した。helper probeは310.8msから14.8ms、helper listingは314.1msから13.6msになった。直下のcached child表示は0.2msだった。
+- `go test ./...`、`go vet ./...`、`go build ./...`は成功した。`go test -race ./...`はこの環境に`gcc`がなく実行できなかった。

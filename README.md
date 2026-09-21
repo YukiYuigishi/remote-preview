@@ -221,7 +221,7 @@ debug logは標準ライブラリの`log/slog`によるkey-value形式で、HTTP
 
 ## How it works
 
-ブラウザから要求が来ると、ローカル側の `ykview` がsystem `ssh` を呼びます。directory listingはcache miss時にforegroundで取得し、対応platformではremote `TMPDIR`に残したGo helperがcurrentと最大16個の直下directoryのlistingを1回で取得します。helper cacheがなければatomicにuploadし、同じhelper binaryが残っていればbinary転送を省略します。helperを利用できない場合はportable shell batchへ、さらに失敗した場合はsingle-directory listingへfallbackします。同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。background prefetchは行いません。ファイル内容はcacheしません。
+ブラウザから要求が来ると、ローカル側の `ykview` がsystem `ssh` を呼びます。同一process内では専用のOpenSSH ControlMasterを自動的に使い、helper probe、listing、file readでSSH transport connectionを再利用します。directory listingはcache miss時にforegroundで取得し、対応platformではremote `TMPDIR`に残したGo helperがcurrentと最大16個の直下directoryのlistingを1回で取得します。helper cacheがなければatomicにuploadし、同じhelper binaryが残っていればbinary転送を省略します。helperを利用できない場合はportable shell batchへ、さらに失敗した場合はsingle-directory listingへfallbackします。同じdirectoryへの同時アクセスは1回のSSH listingにまとめます。background prefetchは行いません。ファイル内容はcacheしません。
 
 helperは最初のbatch listing時にremote platform判定を行います。cache miss時だけbinary uploadが発生するため、ProxyJumpや高RTTの環境でも同じhelper binaryを使う次回起動では転送コストを抑えられます。cache filenameにはcache version、platform、展開後binaryのSHA-256を含めます。cache miss時のuploadはSSH channel compressionを使い、remote側にgzip commandを要求しません。helper実行に失敗した場合は該当cacheを削除してshell batchへfallbackします。
 
@@ -257,15 +257,7 @@ Remote filesystem
 - Windows remote helperは未対応で、現状はshell fallbackを試みる
 - helper cacheがない場合はplatform判定とbinary uploadが発生するため、高RTTやProxyJump環境では初回表示が遅くなる場合がある。cache hit時はbinary uploadを行わない
 - remote helper cacheのstale entryは自動GCしない
-
-SSH ControlMasterを有効にすると、requestごとのconnection overheadをかなり減らせます。
-
-```sshconfig
-Host *
-    ControlMaster auto
-    ControlPersist 5m
-    ControlPath ~/.ssh/cm-%C
-```
+- process-local ControlMasterは終了時に閉じるため、別の`remote-preview` processとのconnection共有は行わない。ControlMaster setupに失敗した場合は通常の独立SSHへfallbackする
 
 ## License
 
