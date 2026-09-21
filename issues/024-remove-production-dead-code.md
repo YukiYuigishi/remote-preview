@@ -16,12 +16,14 @@
 - `internal/preview/remote.go`
 - `internal/preview/main_test.go`
 - `internal/preview/remote_test.go`
+- `.github/workflows/ci.yml`
 
 ## Acceptance criteria
 
 - production sourceから上記3関数がなくなる。
 - `deadcode`と`staticcheck -tests=false`でproduction dead codeが報告されない。
 - target home解決とSSH cancellationの既存production挙動をtestする。
+- GitHub Actionsがtest、race、vet、build、deadcode、staticcheckを実行できる。
 
 ## Verification
 
@@ -33,4 +35,7 @@
 
 ## Current state / blocker
 
-- 未着手。削除対象はdeadcode/staticcheckの両方で確認済み。
+- 完了。`resolveTarget`、`remoteHelperPlatform`、`(*sshRemoteFS).run`と、それらだけに依存するtestを削除した。
+- home-relative targetの解決testは`setResolvedHome`を直接検証し、SSH cancellation testは実運用の`runNamed`境界を検証するよう整理した。
+- `.github/workflows/ci.yml`を追加し、GitHub Actionsのubuntu runnerでtest、race、vet、build、deadcode、staticcheckを実行する。
+- `go test ./...`、`go vet ./...`、`go build ./...`、`go run golang.org/x/tools/cmd/deadcode@latest ./...`、`go run honnef.co/go/tools/cmd/staticcheck@latest -tests=false ./...`は成功した。localのrace testはgcc未導入のため実行不可だが、Actionsは`CGO_ENABLED=1`のubuntu runnerで実行する。
