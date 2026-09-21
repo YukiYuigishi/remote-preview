@@ -6,7 +6,7 @@
 - local filesystem target（relative/absolute path）とremote home-relative target（`~` / relative path）を実装済み。
 - Phase 1–4（責務分割、target改善、context-aware system SSH、portable batch/on-demand directory listing cache）を実装済み。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...` は成功している。
-- 次の主要課題は、ファイル全量読み込みとpreview fallback/HTTP品質（Phase 5）。
+- 次の主要課題は、ファイル全量読み込みとpreview fallback/HTTP品質（Phase 5）。転送機能はIssue 025で別スコープとして追加する。
 - `cmd/ykview`は薄いentrypointで、アプリケーション実装は`internal/preview`に配置されている。
 - directory listingはforegroundで取得し、必要に応じてportable batch commandで直下分も同じSSHにまとめ、TTL cacheとsingleflightで再利用する。
 - debug logは標準ライブラリの`log/slog`でHTTP、cache、batch、SSHの処理境界を追跡できる。
@@ -21,7 +21,7 @@
 
 ## Product decisions
 
-- 対象ユーザーは、対象ホストへSSH接続できる本人。read-only用途を維持する。
+- 対象ユーザーは、対象ホストへSSH接続できる本人。現行MVPはread-only用途を維持し、書き込み機能は明示的なopt-inとして追加する。
 - local targetは`.`, `./...`, `../...`, `~`, absolute pathで指定し、bare nameは既存互換のremote host shorthandとして扱う。
 - `host:/absolute/path` は継続サポートする。
 - `host` だけを指定した場合は、リモートのホームディレクトリを対象にする。
@@ -132,6 +132,13 @@ Acceptance criteria:
 - strict modeでは、解決後のpathがroot配下かを検査し、root外へのsymlinkは表示またはアクセスを拒否する。
 - remote側の`realpath`可用性や権限差を考慮し、通常modeとの互換性を壊さない。
 
+### Phase 7: download/upload transfer
+
+- 個別download、複数選択ZIP、ファイル・ディレクトリのdrag & drop / picker uploadを追加する。
+- local/remoteでrelative path、root confinement、partial file防止を共通化する。
+- rsyncを必須依存にせず、recursive sync・同一内容skip・再実行可能性を参考にする。
+- 詳細な仕様と未確定のwrite policyはIssue 025で管理する。
+
 ## Verification
 
 - Unit: target parser、URL segment、parent/breadcrumb、cache TTL、singleflight、fallback。
@@ -152,3 +159,4 @@ Acceptance criteria:
 6. Go SSH prototypeとtransport選択
 7. root confinement policyとドキュメント
 8. remote-side Go filesystem helper
+9. download/upload transfer（Issue 025）
