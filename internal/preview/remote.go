@@ -489,28 +489,6 @@ func (s *sshRemoteFS) probeHelper(ctx context.Context) (remoteHelperProbeResult,
 	return remoteHelperProbeResult{}, fmt.Errorf("unsupported remote platform: %s", platform)
 }
 
-func remoteHelperPlatform(goos, arch string) (string, error) {
-	normalizedOS := strings.ToLower(strings.TrimSpace(goos))
-	normalizedArch := strings.ToLower(strings.TrimSpace(arch))
-	switch normalizedOS {
-	case "linux":
-		switch normalizedArch {
-		case "x86_64", "amd64":
-			return "linux/amd64", nil
-		case "aarch64", "arm64":
-			return "linux/arm64", nil
-		}
-	case "darwin":
-		switch normalizedArch {
-		case "x86_64", "amd64":
-			return "darwin/amd64", nil
-		case "arm64":
-			return "darwin/arm64", nil
-		}
-	}
-	return "", fmt.Errorf("unsupported remote platform: %s/%s", goos, arch)
-}
-
 func (s *sshRemoteFS) uploadHelper(ctx context.Context, platform, cacheName string, binary []byte) (string, error) {
 	nonceBytes := make([]byte, 16)
 	if _, err := cryptorand.Read(nonceBytes); err != nil {
@@ -648,10 +626,6 @@ func sortRemoteEntries(entries []remoteEntry) {
 		}
 		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 	})
-}
-
-func (s *sshRemoteFS) run(ctx context.Context, args ...string) ([]byte, error) {
-	return s.runNamed(ctx, "command", "", args...)
 }
 
 func (s *sshRemoteFS) runNamed(ctx context.Context, operation, remotePath string, args ...string) ([]byte, error) {

@@ -1,7 +1,6 @@
 package preview
 
 import (
-	"context"
 	"fmt"
 	"html/template"
 	"net/url"
@@ -42,19 +41,6 @@ func parseTarget(s string) (remoteTarget, error) {
 	}
 
 	return remoteTarget{Host: host, Root: root, Home: true}, nil
-}
-
-func resolveTarget(ctx context.Context, target remoteTarget, remote RemoteFS) (remoteTarget, error) {
-	if !target.Home {
-		return target, nil
-	}
-
-	home, err := remote.Home(ctx)
-	if err != nil {
-		return remoteTarget{}, err
-	}
-	target.setResolvedHome(home)
-	return target, nil
 }
 
 func resolveLocalTarget(target remoteTarget) (remoteTarget, error) {
