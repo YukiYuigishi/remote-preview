@@ -39,4 +39,10 @@
 
 ## Current state / blocker
 
-- 調査開始。実SSH hostが利用できない場合は、latency注入可能なfake transportとlocal filesystem fixtureで比較し、実network未計測であることを結果へ明記する。
+- 完了。専用SSH benchmark host上に一時fixtureを作り、各方式をwarmup後5回測定した。一時fixtureとlocal artifactは測定後に削除した。
+- fresh SSH invocationの比較では、Go helper batchがsingle listingと同程度、shell batchより短時間だった。
+- ControlMaster再利用でsession setupと連続commandの待ち時間が短縮した。
+- latency注入benchmarkを追加し、single on-demandはfirst/one child/sequentialで1/2/最大17 SSH calls、foreground batchはすべて1 call、旧prefetchは最大17 callsになることを固定した。旧prefetchの同時実行数は当時と同じ4に制限した。
+- 採用方式は、Go helperによるforeground batch、TTL cache、singleflightを維持し、process-localなOpenSSH ControlMasterを追加してcommand間でtransportを再利用する方式とした。旧parallel prefetchは採用しない。helper unavailable時のshell/single fallbackは維持する。
+- HTTP smoke testでもhelper cache hit時の初回表示が短縮した。
+- `go test ./...`、`go vet ./...`、`go build ./...`は成功した。`go test -race ./...`は実施できなかった。
