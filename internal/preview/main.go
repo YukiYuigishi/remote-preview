@@ -64,13 +64,14 @@ func Run(args []string, program string) error {
 		backend = newLocalRemoteFS()
 	} else {
 		sshBackend := newSSHRemoteFS(target.Host)
+		sshBackend.enableConnectionSharing()
 		backend = sshBackend
 		closer = sshBackend
 	}
 	defer func() {
 		if closer != nil {
 			if closeErr := closer.Close(); closeErr != nil {
-				slog.Debug("remote helper cleanup failed", "host", target.Host, "error", closeErr)
+				slog.Debug("remote transport cleanup failed", "host", target.Host, "error", closeErr)
 			}
 		}
 	}()
