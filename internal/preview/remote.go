@@ -8,8 +8,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,6 +53,12 @@ type sshRemoteFS struct {
 	connectTimeout time.Duration
 	command        sshCommandFactory
 
+	transportMu       sync.Mutex
+	controlDir        string
+	controlPath       string
+	transportClosed   bool
+	controlDirFactory func() (string, error)
+
 	helperMu        sync.Mutex
 	helperDone      chan struct{}
 	helperAttempted bool
@@ -68,8 +76,45 @@ func newSSHRemoteFS(host string) *sshRemoteFS {
 		commandTimeout: 30 * time.Second,
 		connectTimeout: 30 * time.Second,
 		command:        exec.CommandContext,
-		helperDone:     make(chan struct{}),
+		controlDirFactory: func() (string, error) {
+			return os.MkdirTemp("", "remote-preview-ssh-")
+		},
+		helperDone: make(chan struct{}),
 	}
+}
+
+const controlPersist = "30s"
+
+// enableConnectionSharing opts this backend into a process-local OpenSSH
+// ControlMaster. It is deliberately separate from newSSHRemoteFS so tests and
+// other callers that only need an independent SSH invocation do not allocate a
+// temporary directory.
+func (s *sshRemoteFS) enableConnectionSharing() {
+	s.transportMu.Lock()
+	defer s.transportMu.Unlock()
+	if s.transportClosed || s.controlDir != "" {
+		return
+	}
+
+	mkdir := s.controlDirFactory
+	if mkdir == nil {
+		mkdir = func() (string, error) {
+			return os.MkdirTemp("", "remote-preview-ssh-")
+		}
+	}
+	dir, err := mkdir()
+	if err != nil {
+		slog.Debug("remote transport connection sharing setup failed", "host", s.host, "error", err)
+		return
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		_ = os.Remove(dir)
+		slog.Debug("remote transport connection sharing setup failed", "host", s.host, "error", err)
+		return
+	}
+
+	s.controlDir = dir
+	s.controlPath = filepath.Join(dir, "control")
 }
 
 func (s *sshRemoteFS) Home(ctx context.Context) (string, error) {
@@ -459,6 +504,48 @@ func (s *sshRemoteFS) Close() error {
 	s.helperMu.Lock()
 	s.helperPath = ""
 	s.helperMu.Unlock()
+
+	s.transportMu.Lock()
+	controlDir := s.controlDir
+	controlPath := s.controlPath
+	s.controlDir = ""
+	s.controlPath = ""
+	s.transportClosed = true
+	s.transportMu.Unlock()
+	if controlDir == "" {
+		return nil
+	}
+
+	commandTimeout := s.commandTimeout
+	if commandTimeout <= 0 {
+		commandTimeout = 30 * time.Second
+	}
+	connectTimeout := s.connectTimeout
+	if connectTimeout <= 0 {
+		connectTimeout = commandTimeout
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	command := s.command
+	if command == nil {
+		command = exec.CommandContext
+	}
+	cmd := command(closeCtx, "ssh",
+		"-T",
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout="+sshTimeoutSeconds(connectTimeout),
+		"-S", controlPath,
+		"-O", "exit",
+		s.host,
+	)
+	if err := cmd.Run(); err != nil {
+		// No socket is a normal case when no command used the backend. The
+		// exact temporary directory is still removed below.
+		slog.Debug("remote transport master exit failed", "host", s.host, "error", err)
+	}
+	if err := os.RemoveAll(controlDir); err != nil {
+		return fmt.Errorf("remove remote transport directory: %w", err)
+	}
 	return nil
 }
 
@@ -561,8 +648,18 @@ func (s *sshRemoteFS) runNamedInputWithCompression(ctx context.Context, operatio
 	sshArgs = append(sshArgs,
 		"-o", "BatchMode=yes",
 		"-o", "ConnectTimeout="+sshTimeoutSeconds(connectTimeout),
-		s.host,
 	)
+	s.transportMu.Lock()
+	controlPath := s.controlPath
+	s.transportMu.Unlock()
+	if controlPath != "" {
+		sshArgs = append(sshArgs,
+			"-o", "ControlMaster=auto",
+			"-o", "ControlPersist="+controlPersist,
+			"-o", "ControlPath="+controlPath,
+		)
+	}
+	sshArgs = append(sshArgs, s.host)
 	sshArgs = append(sshArgs, shellJoin(args...))
 
 	command := s.command

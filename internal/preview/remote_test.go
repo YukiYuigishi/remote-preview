@@ -39,6 +39,88 @@ func TestSSHRemoteFSAddsConnectionTimeout(t *testing.T) {
 	}
 }
 
+func TestSSHRemoteFSDoesNotAllocateConnectionSharingByDefault(t *testing.T) {
+	remote := newSSHRemoteFS("remote-host")
+	if remote.controlDir != "" || remote.controlPath != "" {
+		t.Fatalf("new backend allocated transport state: dir=%q path=%q", remote.controlDir, remote.controlPath)
+	}
+}
+
+func TestSSHRemoteFSConnectionSharingAddsOptionsAndCleansUp(t *testing.T) {
+	remote := newSSHRemoteFS("remote-host")
+	var calls [][]string
+	remote.command = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		calls = append(calls, append([]string(nil), args...))
+		return exec.CommandContext(ctx, "sh", "-c", "true")
+	}
+	remote.enableConnectionSharing()
+	if remote.controlDir == "" || remote.controlPath == "" {
+		t.Fatal("connection sharing was not enabled")
+	}
+	controlDir := remote.controlDir
+	controlPath := remote.controlPath
+	info, err := os.Stat(controlDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("control directory mode=%#o, want 0700", got)
+	}
+
+	if _, err := remote.run(context.Background(), "true"); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("command calls=%d, want 1", len(calls))
+	}
+	for _, want := range []string{
+		"ControlMaster=auto",
+		"ControlPersist=" + controlPersist,
+		"ControlPath=" + controlPath,
+	} {
+		if !containsArg(calls[0], want) {
+			t.Fatalf("normal SSH args=%v, missing %q", calls[0], want)
+		}
+	}
+
+	if err := remote.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(controlDir); !os.IsNotExist(err) {
+		t.Fatalf("control directory still exists or stat failed: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("command calls after close=%d, want 2", len(calls))
+	}
+	if !containsArg(calls[1], "-O") || !containsArg(calls[1], "exit") || !containsArg(calls[1], "-S") || !containsArg(calls[1], controlPath) {
+		t.Fatalf("close SSH args=%v, want control master exit", calls[1])
+	}
+}
+
+func TestSSHRemoteFSConnectionSharingSetupFailureFallsBack(t *testing.T) {
+	remote := newSSHRemoteFS("remote-host")
+	remote.controlDirFactory = func() (string, error) {
+		return "", errors.New("test setup failure")
+	}
+	var commandArgs []string
+	remote.command = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		commandArgs = append([]string(nil), args...)
+		return exec.CommandContext(ctx, "sh", "-c", "printf ok")
+	}
+	remote.enableConnectionSharing()
+	if remote.controlDir != "" || remote.controlPath != "" {
+		t.Fatal("connection sharing should be disabled after setup failure")
+	}
+	if out, err := remote.run(context.Background(), "true"); err != nil || string(out) != "ok" {
+		t.Fatalf("run output=%q error=%v", out, err)
+	}
+	for _, arg := range commandArgs {
+		if strings.HasPrefix(arg, "ControlMaster=") || strings.HasPrefix(arg, "ControlPersist=") || strings.HasPrefix(arg, "ControlPath=") {
+			t.Fatalf("fallback SSH args unexpectedly contain control option: %v", commandArgs)
+		}
+	}
+}
+
 func TestSSHRemoteFSAddsCompressionOnlyWhenRequested(t *testing.T) {
 	remote := newSSHRemoteFS("remote-host")
 	var compressedArgs, rawArgs []string
