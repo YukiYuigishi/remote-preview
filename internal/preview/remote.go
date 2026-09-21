@@ -543,7 +543,10 @@ func (s *sshRemoteFS) Close() error {
 		// exact temporary directory is still removed below.
 		slog.Debug("remote transport master exit failed", "host", s.host, "error", err)
 	}
-	if err := os.RemoveAll(controlDir); err != nil {
+	if err := os.Remove(controlPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove remote transport socket: %w", err)
+	}
+	if err := os.Remove(controlDir); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove remote transport directory: %w", err)
 	}
 	return nil
