@@ -1,2 +1,20 @@
+# Go build and release artifacts
 /ykview
+/bin/
+/dist/
+/*.test
+*.prof
+coverage.out
+
+# Local Codex configuration
+/.codex/
+
+# OS and editor files
 .DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# The compressed remote helpers under internal/preview/remote_helpers/ are
+# intentionally tracked because they are embedded into the application.
