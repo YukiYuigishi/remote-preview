@@ -19,6 +19,7 @@ Webファイラーからファイルを個別または複数選択でダウン�
 - `RemoteFS`とは分離した転送用のread/write abstractionを設け、既存のdirectory cache・target root制約と統合する。
 - downloadはストリーミングを基本とし、複数選択のZIPもサーバのメモリへ全量展開しない。
 - uploadは一時ファイルへの書き込み後にrenameするなど、転送途中のpartial fileが公開されにくい方式にする。
+- 大きなfile向けにchunk uploadを追加する。offset付きchunk送信、upload sessionのoffset確認・再送、browser UIからのpause / resumeを扱う。
 - write操作は既存のread-only起動と明確に区別し、初期案では明示的なwrite opt-inなしにuploadを受け付けない。
 - rsync本体やremote側の常駐daemonを必須にしない。rsyncを参考に、次の挙動を採用する。
   - directoryのrelative pathを維持したrecursive sync
@@ -55,6 +56,7 @@ Webファイラーからファイルを個別または複数選択でダウン�
 - upload先の親directoryを必要に応じて作成し、転送途中の中途半端なdestination fileを通常の一覧から見せない。
 - 同名destination fileの上書き、skip、エラーの方針がUI・README・テストで一貫している。
 - remote metadata/hashが利用できる場合の同一内容skip、または利用できない場合のfull-file fallbackを選択し、転送失敗後の再実行で既存の正常なファイルを壊さない。
+- 大きなfileを8 MiB単位のchunkでuploadでき、offsetを確認してpause後にresumeまたは再送できる。全chunk受信前にdestinationへ公開せず、完了時だけatomic commitする。
 - write opt-inがない起動ではupload UIまたはupload endpointが無効化され、既存のread-only利用が維持される。
 - upload/downloadの全path入力について、target root外へのpath traversal、意図しないsymlink経由の書き込み、HTTP methodの悪用を防ぐ。
 - request contextのcancel、サイズ上限、timeout、SSH error、archive/upload中の部分失敗をテストする。
@@ -67,7 +69,7 @@ Webファイラーからファイルを個別または複数選択でダウン�
 - ZIP entry名とupload relative pathはtarget rootからの相対pathに限定し、空segment、`.`、`..`、NUL、OS依存のseparatorを正規化・拒否する。
 - remote uploadの実装は、まず既存のsystem `ssh` / remote helperを活用する。remote hostに`rsync`のインストールを要求しない。
 - rsync風の差分判定に必要なremote metadataが不足する場合は、正確性を優先してfull-file transferへfallbackする。hash計算やdelta block transferは、初回実装の必須条件にしない。
-- 書き込みflagは`-write`、上書きはbrowserの確認後に通常fileだけをatomic replace、転送の同時実行数はbrowserからの1 request内で逐次処理とした。remote metadata/hashがない場合はfull-file transferへfallbackする。
+- 書き込みflagは`-write`、上書きはbrowserの確認後に通常fileだけをatomic replace、転送の同時実行数はbrowserのchunk uploadで最大3 fileとした。remote metadata/hashがない場合はfull-file transferへfallbackする。chunk sessionのstagingはlocal temporary fileを使い、process再起動後のsession復元は行わない。
 
 ## Verification
 
@@ -78,6 +80,8 @@ Webファイラーからファイルを個別または複数選択でダウン�
 - browser manual test: file picker、directory picker、drag & drop、進捗、cancel、error、特殊文字filename
 - read-only起動時にwrite操作が無効であることのtest
 - overwrite/skip/retryと同一内容skipのintegration test
+- resumable chunk uploadのoffset確認、途中状態の非公開、最終chunk後のatomic commit、再送のhandler test
+- browser manual test: chunk upload、pause / resume、複数fileの同時進捗
 - `go test ./...`
 - `go test -race ./...`
 - `go vet ./...`
@@ -88,8 +92,9 @@ Webファイラーからファイルを個別または複数選択でダウン�
 - 実装完了。
 - `transferFS`を`RemoteFS`から分離し、local backendはstreaming read、atomic temp file + rename、親directory作成を実装した。
 - SSH backendはsystem `ssh`のstdin/stdout streamingとremote側temp file + renameを利用し、remoteにrsyncやdaemonを要求しない。
-- `-write`を明示した起動だけuploadを有効にする。通常fileは確認後に置換し、symbolic link・directory宛ては拒否する。upload requestの上限は512 MiB。
+- `-write`を明示した起動だけuploadを有効にする。通常fileは確認後に置換し、symbolic link・directory宛ては拒否する。既定のupload requestサイズは無制限で、必要なら`-max-upload-size`でbytes単位の上限を設定できる。chunk uploadは8 MiB単位とする。
 - UIはfile picker、directory picker、drag & drop、個別download、選択ZIP downloadに対応した。directory upload/dropではrelative pathを保持する。
+- 8 MiB chunkの`upload-chunk` endpointとlocal staging sessionを追加し、chunk完了後のatomic commit、offset確認、browserのpause / resumeを実装した。sessionはprocess終了後に復元しない。
 - rsyncのdelta block転送や同一内容skipは未実装。remote metadata/hashが不足する場合のfull-file fallbackとして扱い、今後の最適化候補に残す。
 
 ## Changed files
@@ -103,6 +108,7 @@ Webファイラーからファイルを個別または複数選択でダウン�
 - `internal/preview/cache.go`
 - `internal/preview/main.go`
 - `internal/preview/transfer_test.go`
+- `internal/preview/upload_session.go`
 - `internal/preview/main_test.go`
 - `README.md`
 - `PLAN.md`
@@ -114,3 +120,4 @@ Webファイラーからファイルを個別または複数選択でダウン�
 - `go test -race ./...`: passed
 - `go vet ./...`: passed
 - `go build ./...`: passed
+- resumable chunk uploadのlocal handler test: passed

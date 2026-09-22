@@ -18,11 +18,12 @@ import (
 )
 
 type cliOptions struct {
-	flags    *flag.FlagSet
-	addr     *string
-	openPage *bool
-	write    *bool
-	verbose  *bool
+	flags         *flag.FlagSet
+	addr          *string
+	openPage      *bool
+	write         *bool
+	maxUploadSize *int64
+	verbose       *bool
 }
 
 func newCLIOptions(program string) *cliOptions {
@@ -31,12 +32,13 @@ func newCLIOptions(program string) *cliOptions {
 	addr := flags.String("addr", "127.0.0.1:8080", "listen address")
 	openPage := flags.Bool("open", true, "open the file browser in the default browser (use -open=false to disable)")
 	write := flags.Bool("write", false, "enable file uploads (disabled by default)")
+	maxUploadSize := flags.Int64("max-upload-size", 0, "maximum upload request size in bytes (0 = unlimited)")
 	verbose := flags.Bool("v", false, "log each request")
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), "Usage: %s [options] target\n\n", filepath.Base(program))
 		flags.PrintDefaults()
 	}
-	return &cliOptions{flags: flags, addr: addr, openPage: openPage, write: write, verbose: verbose}
+	return &cliOptions{flags: flags, addr: addr, openPage: openPage, write: write, maxUploadSize: maxUploadSize, verbose: verbose}
 }
 
 func Run(args []string, program string) error {
@@ -49,6 +51,9 @@ func Run(args []string, program string) error {
 	if options.flags.NArg() != 1 {
 		options.flags.Usage()
 		return errors.New("exactly one remote target is required")
+	}
+	if *options.maxUploadSize < 0 {
+		return errors.New("-max-upload-size must be zero or greater")
 	}
 
 	target, err := parseTarget(options.flags.Arg(0))
@@ -89,7 +94,8 @@ func Run(args []string, program string) error {
 	}
 
 	remote := newCachedRemoteFS(backend, target.Host)
-	h := &handler{target: target, remote: remote, transfer: remote, writeEnabled: *options.write, verbose: *options.verbose}
+	h := &handler{target: target, remote: remote, transfer: remote, writeEnabled: *options.write, maxUploadSize: *options.maxUploadSize, uploads: newUploadSessionStore(), verbose: *options.verbose}
+	defer h.uploads.Close()
 	srv := &http.Server{
 		Handler:           h,
 		ReadHeaderTimeout: 5 * time.Second,

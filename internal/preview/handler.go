@@ -11,16 +11,20 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
 
 type handler struct {
-	target       remoteTarget
-	remote       RemoteFS
-	transfer     transferFS
-	writeEnabled bool
-	verbose      bool
+	target        remoteTarget
+	remote        RemoteFS
+	transfer      transferFS
+	writeEnabled  bool
+	maxUploadSize int64
+	uploads       *uploadSessionStore
+	uploadsMu     sync.Mutex
+	verbose       bool
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -129,25 +133,27 @@ func (h *handler) serveDirectory(w http.ResponseWriter, r *http.Request, rel, re
 	}
 
 	data := struct {
-		Title        string
-		Host         string
-		RemotePath   string
-		Breadcrumb   template.HTML
-		Parent       string
-		Entries      []viewEntry
-		CurrentPath  string
-		UploadURL    string
-		WriteEnabled bool
+		Title          string
+		Host           string
+		RemotePath     string
+		Breadcrumb     template.HTML
+		Parent         string
+		Entries        []viewEntry
+		CurrentPath    string
+		UploadURL      string
+		ChunkUploadURL string
+		WriteEnabled   bool
 	}{
-		Title:        directoryTitle(rel),
-		Host:         h.target.Host,
-		RemotePath:   remotePath,
-		Breadcrumb:   breadcrumbHTML(r.URL.EscapedPath(), true),
-		Parent:       parentURL(r.URL.EscapedPath()),
-		Entries:      items,
-		CurrentPath:  rel,
-		UploadURL:    transferURLPrefix + "upload?directory=" + url.QueryEscape(rel),
-		WriteEnabled: h.writeEnabled,
+		Title:          directoryTitle(rel),
+		Host:           h.target.Host,
+		RemotePath:     remotePath,
+		Breadcrumb:     breadcrumbHTML(r.URL.EscapedPath(), true),
+		Parent:         parentURL(r.URL.EscapedPath()),
+		Entries:        items,
+		CurrentPath:    rel,
+		UploadURL:      transferURLPrefix + "upload?directory=" + url.QueryEscape(rel),
+		ChunkUploadURL: transferURLPrefix + "upload-chunk?directory=" + url.QueryEscape(rel),
+		WriteEnabled:   h.writeEnabled,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

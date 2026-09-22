@@ -33,6 +33,7 @@ SSH先またはlocal filesystemを、ローカルブラウザから閲覧・down
 - `Raw` 表示
 - ファイル単位のdownload、複数選択したfile/directoryのZIP download
 - `-write` opt-in時のfile picker / directory picker / drag & drop upload
+- chunk uploadによるPause / Resume（1 chunkは8 MiB）
 - local/remoteでのrelative path保持、atomic upload、symlink宛て書き込み拒否
 - directory listingのTTL cacheと同時アクセスの重複抑制
 - macOS / BusyBox互換のforeground batch listing
@@ -179,7 +180,7 @@ uploadを有効にする場合:
 ./bin/ykview -write remote-host:/remote/path
 ```
 
-`-write`は既定で無効です。uploadは表示中のdirectoryを対象にし、通常fileの同名置換は一時fileからのatomic renameで行います。symbolic linkやdirectoryを上書きせず、1回のupload requestは512 MiBまでです。
+`-write`は既定で無効です。uploadは表示中のdirectoryを対象にし、通常fileの同名置換は一時fileからのatomic renameで行います。symbolic linkやdirectoryを上書きしません。既定ではupload全体の人工的なサイズ上限はなく、必要なら`-max-upload-size <bytes>`でupload request単位の上限を設定できます。ブラウザからのuploadは8 MiB chunkへ分割され、Pause後にResumeできます。
 
 local filesystemを表示する場合:
 
@@ -263,6 +264,7 @@ Remote filesystem
 - live reload未対応
 - file edit / rename / deleteは未対応
 - rsyncのremote依存やdelta block転送は行わず、uploadは必要に応じてfull-file transferへfallbackする
+- Resume用の一時staging fileはykview processのlocal temporary directoryに置かれ、process終了後のsession復元は未対応
 - HTML/SVGはread-only用途の同一origin上で直接表示するため、信頼できるremote fileだけを開く
 - Markdown / Mermaid / syntax highlightのbrowser assetを同梱するため、binary sizeが増える
 - SSH URI形式やIPv6 literalのtarget parserは未対応

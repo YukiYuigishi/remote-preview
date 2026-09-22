@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -235,5 +237,91 @@ func TestHandlerUploadsMultipartFileToLocalTarget(t *testing.T) {
 	}
 	if string(content) != "uploaded" {
 		t.Fatalf("uploaded content=%q", content)
+	}
+}
+
+func TestHandlerResumableUploadCommitsAtomicallyAfterFinalChunk(t *testing.T) {
+	root := t.TempDir()
+	remote := newLocalRemoteFS()
+	store := newUploadSessionStore()
+	h := &handler{
+		target:       remoteTarget{Host: "local", Root: root, Local: true},
+		remote:       remote,
+		transfer:     remote,
+		writeEnabled: true,
+		uploads:      store,
+	}
+	requestChunk := func(id string, offset int64, content string) (uploadChunkResponse, int) {
+		query := "directory=&path=disk.img&total=11&offset=" + strconv.FormatInt(offset, 10)
+		if id != "" {
+			query += "&upload_id=" + id
+		}
+		request := httptest.NewRequest(http.MethodPatch, "/_ykview/transfer/upload-chunk?"+query, strings.NewReader(content))
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, request)
+		var result uploadChunkResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatalf("decode chunk response: %v; body=%s", err, response.Body.String())
+		}
+		return result, response.Code
+	}
+
+	first, status := requestChunk("", 0, "hello")
+	if status != http.StatusOK || first.Complete || first.Offset != 5 || first.UploadID == "" {
+		t.Fatalf("first chunk status=%d response=%#v", status, first)
+	}
+	if _, err := os.Stat(filepath.Join(root, "disk.img")); !os.IsNotExist(err) {
+		t.Fatalf("destination appeared before final chunk, stat error=%v", err)
+	}
+
+	statusResponse := httptest.NewRecorder()
+	h.ServeHTTP(statusResponse, httptest.NewRequest(http.MethodGet, "/_ykview/transfer/upload-chunk?upload_id="+first.UploadID, nil))
+	var current uploadChunkResponse
+	if err := json.Unmarshal(statusResponse.Body.Bytes(), &current); err != nil {
+		t.Fatal(err)
+	}
+	if current.Offset != 5 || current.Complete {
+		t.Fatalf("session status=%#v", current)
+	}
+	wrongOffset, status := requestChunk(first.UploadID, 0, "hello")
+	if status != http.StatusConflict || wrongOffset.Offset != 5 {
+		t.Fatalf("wrong offset status=%d response=%#v", status, wrongOffset)
+	}
+
+	second, status := requestChunk(first.UploadID, first.Offset, " world")
+	if status != http.StatusOK || !second.Complete || second.Offset != 11 {
+		t.Fatalf("final chunk status=%d response=%#v", status, second)
+	}
+	content, err := os.ReadFile(filepath.Join(root, "disk.img"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "hello world" {
+		t.Fatalf("committed content=%q", content)
+	}
+	if len(store.sessions) != 0 {
+		t.Fatalf("completed upload session was not removed: %d", len(store.sessions))
+	}
+}
+
+func TestHandlerResumableUploadHonorsConfiguredLimit(t *testing.T) {
+	root := t.TempDir()
+	remote := newLocalRemoteFS()
+	h := &handler{
+		target:        remoteTarget{Host: "local", Root: root, Local: true},
+		remote:        remote,
+		transfer:      remote,
+		writeEnabled:  true,
+		maxUploadSize: 10,
+		uploads:       newUploadSessionStore(),
+	}
+	request := httptest.NewRequest(http.MethodPatch, "/_ykview/transfer/upload-chunk?directory=&path=disk.img&total=11&offset=0", strings.NewReader("x"))
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(h.uploads.sessions) != 0 {
+		t.Fatalf("oversized upload created a session: %d", len(h.uploads.sessions))
 	}
 }
