@@ -60,6 +60,17 @@ func TestCLIOptionsWriteIsOptIn(t *testing.T) {
 	if !*options.write {
 		t.Fatal("expected -write to enable uploads")
 	}
+	if *options.maxUploadSize != 0 {
+		t.Fatalf("default max upload size=%d, want unlimited", *options.maxUploadSize)
+	}
+
+	options = newCLIOptions("ykview")
+	if err := options.flags.Parse([]string{"-max-upload-size", "1073741824"}); err != nil {
+		t.Fatal(err)
+	}
+	if *options.maxUploadSize != 1073741824 {
+		t.Fatalf("max upload size=%d", *options.maxUploadSize)
+	}
 }
 
 func TestParseTarget(t *testing.T) {

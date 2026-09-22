@@ -40,7 +40,7 @@ var directoryTemplate = template.Must(template.New("directory").Parse(`<!doctype
       <label><input id="directory-picker" type="file" webkitdirectory directory multiple hidden>Choose directory</label>
     </div>
     <div id="drop-zone" class="drop-zone">Drop files or a directory here</div>
-    <p><progress id="upload-progress" max="100" value="0" hidden></progress> <span id="upload-status" role="status"></span></p>
+    <p><progress id="upload-progress" max="100" value="0" hidden></progress> <button id="upload-pause" type="button" hidden>Pause</button> <span id="upload-status" role="status"></span></p>
   </section>
   {{end}}
   <table>
@@ -58,7 +58,7 @@ var directoryTemplate = template.Must(template.New("directory").Parse(`<!doctype
     {{end}}
     </tbody>
   </table>
-  <div id="transfer-config" data-upload-url="{{.UploadURL}}"></div>
+  <div id="transfer-config" data-upload-url="{{.UploadURL}}" data-chunk-upload-url="{{.ChunkUploadURL}}"></div>
   <script>
     (() => {
       const selected = () => Array.from(document.querySelectorAll('.entry-select:checked'));
@@ -83,6 +83,7 @@ var directoryTemplate = template.Must(template.New("directory").Parse(`<!doctype
       const directoryPicker = document.getElementById('directory-picker');
       const dropZone = document.getElementById('drop-zone');
       const progress = document.getElementById('upload-progress');
+      const pauseButton = document.getElementById('upload-pause');
       const status = document.getElementById('upload-status');
       if (!config || !filePicker || !directoryPicker || !dropZone) return;
 
@@ -120,42 +121,93 @@ var directoryTemplate = template.Must(template.New("directory").Parse(`<!doctype
         for (const entry of entries) await walkEntry(entry, '', output);
         return output;
       };
-      const upload = (records) => {
+      let paused = false;
+      let uploading = false;
+      let resumeWaiters = [];
+      const waitForResume = () => paused ? new Promise((resolve) => resumeWaiters.push(resolve)) : Promise.resolve();
+      const updateProgress = (uploaded, total) => {
+        progress.value = total ? Math.min(100, Math.round(uploaded / total * 100)) : 100;
+      };
+      const requestChunk = (record, uploadID, offset, chunk) => new Promise((resolve, reject) => {
+        const url = new URL(config.dataset.chunkUploadUrl, window.location.href);
+        url.searchParams.set('path', record.path);
+        url.searchParams.set('total', String(record.file.size));
+        url.searchParams.set('offset', String(offset));
+        if (uploadID) url.searchParams.set('upload_id', uploadID);
+        const xhr = new XMLHttpRequest();
+        xhr.open('PATCH', url.toString());
+        xhr.onload = () => {
+          let response = {};
+          try { response = JSON.parse(xhr.responseText); } catch (_) {}
+          if (xhr.status >= 200 && xhr.status < 300) resolve(response);
+          else reject(new Error(response.error || ('Upload failed (' + xhr.status + ').')));
+        };
+        xhr.onerror = () => reject(new Error('Upload connection failed.'));
+        xhr.send(chunk);
+      });
+      const uploadOne = async (record, progressBytes, totalBytes) => {
+        let uploadID = '';
+        let offset = 0;
+        do {
+          await waitForResume();
+          const end = Math.min(offset + 8 * 1024 * 1024, record.file.size);
+          const response = await requestChunk(record, uploadID, offset, record.file.slice(offset, end));
+          uploadID = response.upload_id || uploadID;
+          offset = response.offset;
+          progressBytes[record.index] = offset;
+          updateProgress(progressBytes.reduce((sum, value) => sum + value, 0), totalBytes);
+          if (response.complete) return;
+        } while (offset < record.file.size || record.file.size === 0);
+      };
+      const upload = async (records) => {
         if (!records.length) return;
+        if (uploading) return;
         if (!window.confirm('Upload ' + records.length + ' file(s) to this directory? Existing regular files will be replaced.')) {
           status.textContent = 'Upload cancelled.';
           return;
         }
-        const form = new FormData();
-        records.forEach((record) => {
-          form.append('files', record.file, record.file.name);
-          form.append('paths', record.path);
-        });
-        const xhr = new XMLHttpRequest();
+        uploading = true;
+        paused = false;
+        records = records.map((record, index) => ({ ...record, index }));
         const total = records.reduce((sum, record) => sum + record.file.size, 0);
+        const progressBytes = records.map(() => 0);
         progress.hidden = false;
         progress.value = 0;
         status.textContent = 'Uploading…';
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable) progress.value = Math.round(event.loaded / event.total * 100);
-          else if (total) progress.value = Math.min(99, Math.round(event.loaded / total * 100));
-        };
-        xhr.onload = () => {
-          let response = {};
-          try { response = JSON.parse(xhr.responseText); } catch (_) {}
-          if (xhr.status >= 200 && xhr.status < 300) {
-            progress.value = 100;
-            status.textContent = 'Uploaded ' + (response.uploaded?.length || records.length) + ' file(s). Reloading…';
-            window.setTimeout(() => window.location.reload(), 300);
-          } else {
-            status.textContent = response.error || ('Upload failed (' + xhr.status + ').');
-          }
-        };
-        xhr.onerror = () => { status.textContent = 'Upload failed.'; };
-        xhr.onabort = () => { status.textContent = 'Upload cancelled.'; };
-        xhr.open('POST', config.dataset.uploadUrl);
-        xhr.send(form);
+        pauseButton.hidden = false;
+        pauseButton.textContent = 'Pause';
+        try {
+          let next = 0;
+          const worker = async () => {
+            while (next < records.length) {
+              const index = next++;
+              await uploadOne(records[index], progressBytes, total);
+            }
+          };
+          await Promise.all(Array.from({ length: Math.min(3, records.length) }, worker));
+          progress.value = 100;
+          status.textContent = 'Uploaded ' + records.length + ' file(s). Reloading…';
+          window.setTimeout(() => window.location.reload(), 300);
+        } catch (error) {
+          status.textContent = error.message || 'Upload failed.';
+        } finally {
+          uploading = false;
+          pauseButton.hidden = true;
+          paused = false;
+          resumeWaiters.forEach((resolve) => resolve());
+          resumeWaiters = [];
+        }
       };
+      pauseButton.addEventListener('click', () => {
+        if (!uploading) return;
+        paused = !paused;
+        pauseButton.textContent = paused ? 'Resume' : 'Pause';
+        status.textContent = paused ? 'Paused after the current chunk.' : 'Resuming…';
+        if (!paused) {
+          resumeWaiters.forEach((resolve) => resolve());
+          resumeWaiters = [];
+        }
+      });
       filePicker.addEventListener('change', () => upload(pickerRecords(filePicker)));
       directoryPicker.addEventListener('change', () => upload(pickerRecords(directoryPicker)));
       dropZone.addEventListener('dragover', (event) => { event.preventDefault(); dropZone.classList.add('dragover'); });

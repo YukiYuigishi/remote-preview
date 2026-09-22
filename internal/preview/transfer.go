@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	maxUploadBodySize   int64 = 512 << 20
-	maxUploadMemorySize       = 32 << 20
+	maxUploadMemorySize int64 = 32 << 20
+	uploadChunkSize     int64 = 8 << 20
 	maxArchiveEntries         = 10_000
 	maxArchiveDepth           = 256
 )
