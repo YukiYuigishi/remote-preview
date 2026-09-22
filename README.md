@@ -122,6 +122,8 @@ remote-side helperの埋め込みartifactはLinux/darwinのamd64/arm64向けに�
 make generate
 ```
 
+通常の`make build`と`make check`は、tracked済みのhelper artifactをそのまま使い、`go generate`を自動実行しません。Go toolchainのversionやbuild環境によってhelper binaryが変わる可能性があるため、artifactの更新が必要なときだけ`make generate`を明示的に実行し、差分を確認してcommitします。
+
 主なdevelopment command:
 
 ```bash
@@ -130,7 +132,7 @@ make test-race  # go test -race ./...
 make vet        # go vet ./...
 make build-helper # standalone ykview-helperをbin/へbuild
 make install    # go install ./cmd/ykview（通常は~/go/bin）
-make check      # generate + test + race + vet + build
+make check      # test + race + vet + build（helper artifactは再生成しない）
 make clean      # bin/のMakefile生成物を削除
 ```
 

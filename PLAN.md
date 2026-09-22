@@ -17,7 +17,7 @@
 - text-like fileはbrowser内viewerへ送り、対応source codeは同梱したbrowser-side highlight.jsでsyntax highlightを利用する。assetやrich renderingに失敗した場合はplain text/sourceへfallbackする。
 - HTML fileは通常のfile linkから同一originの`text/html`として直接表示し、listen portが使用中なら後続の空きportへ自動でずらす。
 - Markdown、Mermaid、highlight.jsのbrowser assetはversion固定でbinaryへembedし、localhostから配信する。runtime CDN依存はない。
-- MakefileはIssue 011でbuild、helper生成、test、race、vet、check、cleanを再現する。
+- MakefileはIssue 011でbuild、helper生成、test、race、vet、check、cleanを再現する。通常のbuild/checkはtracked helper artifactを再生成せず、更新は明示的な`make generate`で行う。
 - GitHub Actionsはpush/PRで`make check`を実行し、`v*` tagでLinux/Darwinの4 platform release archiveを公開する。
 - `/bin/`、`/dist/`、`.codex/`などのローカル生成物はGit管理対象外とし、`internal/preview/remote_helpers/*.gz`はembedded artifactとして追跡する。
 
