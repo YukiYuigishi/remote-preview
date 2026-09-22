@@ -8,7 +8,7 @@ HELPER := $(BINDIR)/ykview-helper
 
 all: build
 
-build: generate
+build:
 	mkdir -p "$(BINDIR)"
 	$(GO) build -trimpath -o "$(APP)" ./cmd/ykview
 
@@ -31,7 +31,7 @@ test-race:
 vet:
 	$(GO) vet ./...
 
-check: generate
+check:
 	$(GO) test ./...
 	$(GO) test -race ./...
 	$(GO) vet ./...
