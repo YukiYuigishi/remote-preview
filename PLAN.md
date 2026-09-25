@@ -21,6 +21,7 @@
 - GitHub Actionsはpush/PRで`make check`を実行し、`v*` tagでLinux/Darwinの4 platform release archiveを公開する。
 - `/bin/`、`/dist/`、`.codex/`などのローカル生成物はGit管理対象外とし、`internal/preview/remote_helpers/*.gz`はembedded artifactとして追跡する。
 - SVGのdirect previewはIssue 028で実装済み。通常のファイルリンクから`image/svg+xml`として表示する。
+- CSV / TSVのtable previewとJSON Lines表示をIssue 029、audio / video previewとRange streamingをIssue 030で実装する。
 
 ## Product decisions
 
@@ -164,3 +165,5 @@ Acceptance criteria:
 7. root confinement policyとドキュメント
 8. remote-side Go filesystem helper
 9. download/upload transfer（Issue 025）
+10. structured data preview（Issue 029）
+11. audio/video previewとRange request（Issue 030）
