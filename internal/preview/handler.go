@@ -2,9 +2,11 @@ package preview
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -113,6 +115,14 @@ func (h *handler) serveDirectory(w http.ResponseWriter, r *http.Request, rel, re
 		} else if isHTML(entry.Name) {
 			icon = "🌐"
 			kindLabel = "html"
+		} else if isCSV(entry.Name) {
+			icon = "📊"
+			kindLabel = "CSV table"
+		} else if isTSV(entry.Name) {
+			icon = "📊"
+			kindLabel = "TSV table"
+		} else if isJSONLines(entry.Name) {
+			kindLabel = "JSON lines"
 		} else if isPlainText(entry.Name) {
 			kindLabel = "text"
 		}
@@ -189,6 +199,14 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, rel, remoteP
 		serveRaw(w, r, remotePath, data)
 		return
 	}
+	if isCSV(remotePath) {
+		h.serveDelimited(w, r, remotePath, data, ',')
+		return
+	}
+	if isTSV(remotePath) {
+		h.serveDelimited(w, r, remotePath, data, '\t')
+		return
+	}
 
 	if isTextFile(remotePath, data) {
 		h.serveText(w, r, rel, remotePath, data)
@@ -230,6 +248,10 @@ func (h *handler) serveMarkdown(w http.ResponseWriter, r *http.Request, rel, rem
 }
 
 func (h *handler) serveText(w http.ResponseWriter, r *http.Request, rel, remotePath string, source []byte) {
+	h.serveTextWithNotice(w, r, rel, remotePath, source, "")
+}
+
+func (h *handler) serveTextWithNotice(w http.ResponseWriter, r *http.Request, rel, remotePath string, source []byte, notice string) {
 	if r.Method == http.MethodHead {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
@@ -248,6 +270,7 @@ func (h *handler) serveText(w http.ResponseWriter, r *http.Request, rel, remoteP
 		SourceJSON   template.JS
 		Language     string
 		LanguageJSON template.JS
+		Notice       string
 	}{
 		Name:         path.Base(remotePath),
 		Host:         h.target.Host,
@@ -258,6 +281,7 @@ func (h *handler) serveText(w http.ResponseWriter, r *http.Request, rel, remoteP
 		SourceJSON:   template.JS(jsonSource),
 		Language:     syntaxLanguage(remotePath),
 		LanguageJSON: template.JS(jsonLanguage),
+		Notice:       notice,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -265,6 +289,193 @@ func (h *handler) serveText(w http.ResponseWriter, r *http.Request, rel, remoteP
 	if err := textTemplate.Execute(w, data); err != nil {
 		slog.Error("render text", "error", err)
 	}
+}
+
+const (
+	maxDelimitedPreviewRows       = 200
+	maxDelimitedPreviewColumns    = 40
+	maxDelimitedPreviewFieldBytes = 4096
+)
+
+type delimitedPreview struct {
+	Name         string
+	Host         string
+	RemotePath   string
+	Breadcrumb   template.HTML
+	RawURL       string
+	SourceURL    string
+	TableURL     string
+	Source       string
+	Headers      []string
+	Rows         [][]string
+	SourceView   bool
+	Empty        bool
+	LimitMessage string
+}
+
+type parsedDelimitedPreview struct {
+	Headers         []string
+	Rows            [][]string
+	Empty           bool
+	RowsOmitted     bool
+	ColumnsOmitted  bool
+	FieldsTruncated bool
+}
+
+func (h *handler) serveDelimited(w http.ResponseWriter, r *http.Request, remotePath string, source []byte, separator rune) {
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		return
+	}
+
+	viewSource := r.URL.Query().Get("view") == "source"
+	preview := parsedDelimitedPreview{Empty: true}
+	if !viewSource {
+		var err error
+		preview, err = parseDelimitedPreview(source, separator)
+		if err != nil {
+			format := "CSV"
+			if separator == '\t' {
+				format = "TSV"
+			}
+			h.serveTextWithNotice(w, r, "", remotePath, source, format+" could not be parsed. Showing source.")
+			return
+		}
+	}
+
+	data := delimitedPreview{
+		Name:       path.Base(remotePath),
+		Host:       h.target.Host,
+		RemotePath: remotePath,
+		Breadcrumb: breadcrumbHTML(r.URL.EscapedPath(), false),
+		RawURL:     withRawQuery(r.URL),
+		SourceURL:  withQueryValue(r.URL, "view", "source"),
+		TableURL:   withQueryValue(r.URL, "view", "table"),
+		Source:     string(source),
+		Headers:    preview.Headers,
+		Rows:       preview.Rows,
+		SourceView: viewSource,
+		Empty:      preview.Empty,
+	}
+	if preview.RowsOmitted || preview.ColumnsOmitted || preview.FieldsTruncated {
+		data.LimitMessage = fmt.Sprintf("Preview limits: up to %d records, %d columns, and %d bytes per field. Some content is omitted.", maxDelimitedPreviewRows, maxDelimitedPreviewColumns, maxDelimitedPreviewFieldBytes)
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := delimitedTemplate.Execute(w, data); err != nil {
+		slog.Error("render delimited preview", "error", err)
+	}
+}
+
+func parseDelimitedPreview(source []byte, separator rune) (parsedDelimitedPreview, error) {
+	reader := csv.NewReader(bytes.NewReader(source))
+	reader.Comma = separator
+	reader.FieldsPerRecord = -1
+
+	result := parsedDelimitedPreview{}
+	header, err := reader.Read()
+	if err != nil {
+		if err == io.EOF {
+			result.Empty = true
+			return result, nil
+		}
+		return result, err
+	}
+	result.Empty = false
+	header = limitDelimitedRecord(header, &result)
+
+	var records [][]string
+	for len(records) < maxDelimitedPreviewRows {
+		record, readErr := reader.Read()
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return parsedDelimitedPreview{}, readErr
+		}
+		records = append(records, limitDelimitedRecord(record, &result))
+	}
+	if len(records) == maxDelimitedPreviewRows {
+		_, readErr := reader.Read()
+		if readErr == nil {
+			result.RowsOmitted = true
+		} else if readErr != io.EOF {
+			return parsedDelimitedPreview{}, readErr
+		}
+	}
+
+	columnCount := len(header)
+	for _, record := range records {
+		if len(record) > columnCount {
+			columnCount = len(record)
+		}
+	}
+	if columnCount > maxDelimitedPreviewColumns {
+		columnCount = maxDelimitedPreviewColumns
+		result.ColumnsOmitted = true
+	}
+	result.Headers = make([]string, columnCount)
+	for i := range result.Headers {
+		if i < len(header) {
+			result.Headers[i] = header[i]
+		} else {
+			result.Headers[i] = fmt.Sprintf("Column %d", i+1)
+		}
+	}
+	result.Rows = make([][]string, len(records))
+	for rowIndex, record := range records {
+		row := make([]string, columnCount)
+		copy(row, record)
+		result.Rows[rowIndex] = row
+	}
+	return result, nil
+}
+
+func limitDelimitedRecord(record []string, preview *parsedDelimitedPreview) []string {
+	if len(record) > maxDelimitedPreviewColumns {
+		preview.ColumnsOmitted = true
+		record = record[:maxDelimitedPreviewColumns]
+	}
+	for i, field := range record {
+		if len(field) > maxDelimitedPreviewFieldBytes {
+			end := maxDelimitedPreviewFieldBytes
+			if utf8.ValidString(field) {
+				for end > 0 && !utf8.RuneStart(field[end]) {
+					end--
+				}
+			}
+			record[i] = strings.ToValidUTF8(field[:end], "�") + "…"
+			preview.FieldsTruncated = true
+		}
+	}
+	return record
+}
+
+func isCSV(p string) bool {
+	return strings.EqualFold(path.Ext(p), ".csv")
+}
+
+func isTSV(p string) bool {
+	return strings.EqualFold(path.Ext(p), ".tsv")
+}
+
+func isJSONLines(p string) bool {
+	ext := strings.ToLower(path.Ext(p))
+	return ext == ".jsonl" || ext == ".ndjson"
+}
+
+func withQueryValue(u *url.URL, key, value string) string {
+	q := u.Query()
+	if value == "" {
+		q.Del(key)
+	} else {
+		q.Set(key, value)
+	}
+	copy := *u
+	copy.RawQuery = q.Encode()
+	return copy.RequestURI()
 }
 
 func serveRaw(w http.ResponseWriter, r *http.Request, remotePath string, data []byte) {
@@ -316,7 +527,7 @@ func isSVG(p string) bool {
 
 func isPlainText(p string) bool {
 	switch strings.ToLower(path.Ext(p)) {
-	case ".txt", ".text", ".log", ".json", ".yaml", ".yml", ".toml", ".xml", ".csv", ".tsv", ".go", ".rs", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".java", ".kt", ".kts", ".swift", ".rb", ".php", ".pl", ".lua", ".r", ".scala", ".ex", ".exs", ".erl", ".hrl", ".hs", ".fs", ".fsx", ".vb", ".groovy", ".gradle", ".css", ".scss", ".less", ".sh", ".bash", ".zsh", ".fish", ".bat", ".cmd", ".ps1", ".sql", ".conf", ".ini", ".properties", ".env", ".lock", ".patch", ".diff", ".tex", ".rst", ".adoc", ".graphql", ".gql", ".proto", ".tf", ".hcl", ".vim":
+	case ".txt", ".text", ".log", ".json", ".jsonl", ".ndjson", ".yaml", ".yml", ".toml", ".xml", ".csv", ".tsv", ".go", ".rs", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".java", ".kt", ".kts", ".swift", ".rb", ".php", ".pl", ".lua", ".r", ".scala", ".ex", ".exs", ".erl", ".hrl", ".hs", ".fs", ".fsx", ".vb", ".groovy", ".gradle", ".css", ".scss", ".less", ".sh", ".bash", ".zsh", ".fish", ".bat", ".cmd", ".ps1", ".sql", ".conf", ".ini", ".properties", ".env", ".lock", ".patch", ".diff", ".tex", ".rst", ".adoc", ".graphql", ".gql", ".proto", ".tf", ".hcl", ".vim":
 		return true
 	default:
 		name := strings.ToLower(path.Base(p))
@@ -351,7 +562,7 @@ func syntaxLanguage(p string) string {
 		return "c"
 	case ".cc", ".cpp", ".cxx", ".hpp":
 		return "cpp"
-	case ".json":
+	case ".json", ".jsonl", ".ndjson":
 		return "json"
 	case ".yaml", ".yml":
 		return "yaml"

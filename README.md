@@ -28,6 +28,8 @@ SSH先またはlocal filesystemを、ローカルブラウザから閲覧・down
   - autolinks
 - ` ```mermaid ` fenced code blockをMermaidとして描画
 - PNG/JPEG/WebP/SVGなど: そのまま表示
+- CSV/TSV: table preview（表示上限あり、source表示へ切り替え可能）
+- JSON Lines（`.jsonl` / `.ndjson`）: JSON syntax highlight付きtext viewer
 - source code / JSON / YAML / textなど: browser内text viewer
 - 対応するsource codeは同梱のhighlight.jsでsyntax highlight
 - `Raw` 表示

@@ -148,6 +148,111 @@ func TestHandlerEscapesTextSourceForHTMLAndJavaScript(t *testing.T) {
 	}
 }
 
+func TestHandlerServesCSVAsTableAndSource(t *testing.T) {
+	content := "name,note\nAlice,\"contains, separator\nand newline\"\n"
+	backend := newFakeRemoteFS()
+	backend.kinds["/root/data.csv"] = "file"
+	backend.reads["/root/data.csv"] = []byte(content)
+	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: backend}
+
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/data.csv", nil))
+	body := response.Body.String()
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "text/html; charset=utf-8" {
+		t.Fatalf("response=%d content-type=%q", response.Code, response.Header().Get("Content-Type"))
+	}
+	for _, want := range []string{"<th scope=\"col\">name</th>", "<th scope=\"col\">note</th>", "Alice", "contains, separator", "and newline", "view=source"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("table response missing %q: %q", want, body)
+		}
+	}
+
+	sourceResponse := httptest.NewRecorder()
+	h.ServeHTTP(sourceResponse, httptest.NewRequest(http.MethodGet, "/data.csv?view=source", nil))
+	if sourceResponse.Code != http.StatusOK || !strings.Contains(sourceResponse.Body.String(), "<pre>name,note\nAlice,&#34;contains, separator") || !strings.Contains(sourceResponse.Body.String(), "and newline&#34;\n</pre>") {
+		t.Fatalf("source response=%d body=%q", sourceResponse.Code, sourceResponse.Body.String())
+	}
+}
+
+func TestHandlerServesTSVAndJSONLines(t *testing.T) {
+	backend := newFakeRemoteFS()
+	backend.kinds["/root/data.tsv"] = "file"
+	backend.reads["/root/data.tsv"] = []byte("name\tnote\nAlice\t\"contains\ttab\"\n")
+	for _, name := range []string{"events.jsonl", "events.ndjson"} {
+		backend.kinds["/root/"+name] = "file"
+		backend.reads["/root/"+name] = []byte("{\"ok\":true}\n")
+	}
+	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: backend}
+
+	tsvResponse := httptest.NewRecorder()
+	h.ServeHTTP(tsvResponse, httptest.NewRequest(http.MethodGet, "/data.tsv", nil))
+	if tsvResponse.Code != http.StatusOK || !strings.Contains(tsvResponse.Body.String(), "contains\ttab") {
+		t.Fatalf("TSV response=%d body=%q", tsvResponse.Code, tsvResponse.Body.String())
+	}
+
+	for _, name := range []string{"events.jsonl", "events.ndjson"} {
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/"+name, nil))
+		body := response.Body.String()
+		if response.Code != http.StatusOK || !strings.Contains(body, `class="language-json"`) || !strings.Contains(body, `&#34;ok&#34;:true`) || !strings.Contains(body, `const language = "json";`) {
+			t.Fatalf("%s response=%d body=%q", name, response.Code, body)
+		}
+	}
+}
+
+func TestHandlerFallsBackToSourceForMalformedCSV(t *testing.T) {
+	backend := newFakeRemoteFS()
+	backend.kinds["/root/bad.csv"] = "file"
+	backend.reads["/root/bad.csv"] = []byte("name,note\n\"unfinished")
+	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: backend}
+
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/bad.csv", nil))
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, "CSV could not be parsed. Showing source.") || !strings.Contains(body, `id="source-code"`) || !strings.Contains(body, "unfinished") {
+		t.Fatalf("fallback response=%d body=%q", response.Code, body)
+	}
+}
+
+func TestHandlerExplainsDelimitedPreviewLimitsAndKeepsSourceLink(t *testing.T) {
+	content := "value\n" + strings.Repeat("record\n", maxDelimitedPreviewRows+1)
+	backend := newFakeRemoteFS()
+	backend.kinds["/root/large.csv"] = "file"
+	backend.reads["/root/large.csv"] = []byte(content)
+	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: backend}
+
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/large.csv", nil))
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, "Preview limits:") || !strings.Contains(body, "View full source") || !strings.Contains(body, "view=source") {
+		t.Fatalf("limited response=%d body=%q", response.Code, body)
+	}
+	if got := strings.Count(body, "<td>record</td>"); got != maxDelimitedPreviewRows {
+		t.Fatalf("rendered records=%d, want %d", got, maxDelimitedPreviewRows)
+	}
+}
+
+func TestDirectoryListingClassifiesStructuredData(t *testing.T) {
+	backend := newFakeRemoteFS()
+	backend.kinds["/root"] = "dir"
+	backend.lists["/root"] = []remoteEntry{
+		{Name: "data.csv", Kind: "file"},
+		{Name: "data.tsv", Kind: "file"},
+		{Name: "events.jsonl", Kind: "file"},
+		{Name: "events.ndjson", Kind: "file"},
+	}
+	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: backend}
+
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	body := response.Body.String()
+	for _, want := range []string{"CSV table", "TSV table", "JSON lines"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("directory listing missing %q: %q", want, body)
+		}
+	}
+}
+
 func TestTextDetectionAndSyntaxLanguage(t *testing.T) {
 	if !isTextFile("unknown.data", []byte("valid UTF-8 text")) {
 		t.Fatal("expected unknown UTF-8 file to be text")
@@ -160,5 +265,10 @@ func TestTextDetectionAndSyntaxLanguage(t *testing.T) {
 	}
 	if got := syntaxLanguage("notes.txt"); got != "" {
 		t.Fatalf("plain text syntax language=%q, want empty", got)
+	}
+	for _, name := range []string{"events.jsonl", "events.ndjson"} {
+		if !isPlainText(name) || syntaxLanguage(name) != "json" {
+			t.Fatalf("JSON Lines classification for %q: plain=%v language=%q", name, isPlainText(name), syntaxLanguage(name))
+		}
 	}
 }
