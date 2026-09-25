@@ -20,6 +20,7 @@
 - MakefileはIssue 011でbuild、helper生成、test、race、vet、check、cleanを再現する。通常のbuild/checkはtracked helper artifactを再生成せず、更新は明示的な`make generate`で行う。
 - GitHub Actionsはpush/PRで`make check`を実行し、`v*` tagでLinux/Darwinの4 platform release archiveを公開する。
 - `/bin/`、`/dist/`、`.codex/`などのローカル生成物はGit管理対象外とし、`internal/preview/remote_helpers/*.gz`はembedded artifactとして追跡する。
+- SVGのdirect previewはIssue 028で実装済み。通常のファイルリンクから`image/svg+xml`として表示する。
 
 ## Product decisions
 
