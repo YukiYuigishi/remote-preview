@@ -167,6 +167,73 @@ func TestSetResolvedHome(t *testing.T) {
 	}
 }
 
+func TestParseDelimitedPreviewHandlesQuotedFieldsAndUnevenRecords(t *testing.T) {
+	got, err := parseDelimitedPreview([]byte("name,note\nAlice,\"contains, separator\nand newline\"\nBob\n"), ',')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Empty || len(got.Headers) != 2 || len(got.Rows) != 2 {
+		t.Fatalf("preview shape=%#v", got)
+	}
+	if got.Rows[0][1] != "contains, separator\nand newline" {
+		t.Fatalf("quoted multiline field=%q", got.Rows[0][1])
+	}
+	if got.Rows[1][0] != "Bob" || got.Rows[1][1] != "" {
+		t.Fatalf("uneven record=%#v", got.Rows[1])
+	}
+}
+
+func TestParseDelimitedPreviewEmptyAndHeaderOnly(t *testing.T) {
+	got, err := parseDelimitedPreview(nil, ',')
+	if err != nil || !got.Empty || len(got.Headers) != 0 {
+		t.Fatalf("empty preview=%#v, err=%v", got, err)
+	}
+
+	got, err = parseDelimitedPreview([]byte("name,value\n"), ',')
+	if err != nil || got.Empty || len(got.Headers) != 2 || len(got.Rows) != 0 {
+		t.Fatalf("header-only preview=%#v, err=%v", got, err)
+	}
+}
+
+func TestParseDelimitedPreviewAppliesDisplayLimits(t *testing.T) {
+	var source strings.Builder
+	source.WriteString("value\n")
+	for i := 0; i <= maxDelimitedPreviewRows; i++ {
+		source.WriteString("row\n")
+	}
+	got, err := parseDelimitedPreview([]byte(source.String()), ',')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Rows) != maxDelimitedPreviewRows || !got.RowsOmitted {
+		t.Fatalf("row cap: rows=%d omitted=%v", len(got.Rows), got.RowsOmitted)
+	}
+
+	wide := strings.Repeat("column,", maxDelimitedPreviewColumns) + "extra\n"
+	got, err = parseDelimitedPreview([]byte(wide), ',')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Headers) != maxDelimitedPreviewColumns || !got.ColumnsOmitted {
+		t.Fatalf("column cap: columns=%d omitted=%v", len(got.Headers), got.ColumnsOmitted)
+	}
+
+	longField := strings.Repeat("x", maxDelimitedPreviewFieldBytes+1)
+	got, err = parseDelimitedPreview([]byte("value\n"+longField+"\n"), ',')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.FieldsTruncated || len(got.Rows[0][0]) > maxDelimitedPreviewFieldBytes+3 {
+		t.Fatalf("field cap: truncated=%v bytes=%d", got.FieldsTruncated, len(got.Rows[0][0]))
+	}
+}
+
+func TestParseDelimitedPreviewRejectsMalformedCSV(t *testing.T) {
+	if _, err := parseDelimitedPreview([]byte("name,note\n\"unfinished"), ','); err == nil {
+		t.Fatal("expected malformed quoted field to fail parsing")
+	}
+}
+
 func TestShellQuote(t *testing.T) {
 	got := shellQuote("a'b")
 	want := `'a'"'"'b'`

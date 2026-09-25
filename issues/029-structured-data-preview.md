@@ -33,14 +33,13 @@ CSV / TSVを表として閲覧できるようにし、JSON Linesを行単位のJ
 
 ## Verification
 
-- CSV / TSV parserと表示上限のunit test
-- CSV / TSV / JSON Linesのhandler test
-- `go test ./...`
-- `go test -race ./...`
-- `go vet ./...`
-- `go build ./...`
+- [x] CSV / TSV parser, malformed input, empty/header-only files, uneven records, and display limit tests.
+- [x] CSV / TSV / JSON Lines handler tests, directory listing classification, and source fallback tests.
+- [x] `go test ./...`
+- [x] `go test -race ./...`
+- [x] `go vet ./...`
+- [x] `go build ./...`
 
 ## Current state
 
-- Planned.
-
+- Implemented CSV / TSV table preview with source switching, display limits, and source fallback on parser errors. JSONL / NDJSON use the text viewer with JSON syntax highlighting.

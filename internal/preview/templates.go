@@ -294,6 +294,7 @@ var textTemplate = template.Must(template.New("text").Parse(`<!doctype html>
     nav a { text-decoration: none; }
     .toolbar { display: flex; gap: .8rem; margin-bottom: 1rem; }
     pre { overflow: auto; padding: 1rem; border-radius: .4rem; background: #8882; }
+    .notice { padding: .8rem; margin: 1rem 0; border: 1px solid #8888; border-radius: .4rem; }
   </style>
   <link rel="stylesheet" href="/_ykview/assets/v1/highlight.css">
 </head>
@@ -302,6 +303,7 @@ var textTemplate = template.Must(template.New("text").Parse(`<!doctype html>
   <h1>{{.Name}}</h1>
   <p><code>{{.RemotePath}}</code></p>
   <div class="toolbar"><a href="{{.RawURL}}">Raw</a></div>
+  {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
   <pre><code id="source-code" class="language-{{.Language}}">{{.Source}}</code></pre>
   <script src="/_ykview/assets/v1/highlight.js"></script>
   <script>
@@ -317,5 +319,52 @@ var textTemplate = template.Must(template.New("text").Parse(`<!doctype html>
       }
     }
   </script>
+</body>
+</html>`))
+
+var delimitedTemplate = template.Must(template.New("delimited").Parse(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Name}} · {{.Host}}</title>
+  <style>
+    :root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
+    body { max-width: 1200px; margin: 0 auto; padding: 1rem; }
+    nav { margin-bottom: 1rem; overflow-wrap: anywhere; }
+    nav a { text-decoration: none; }
+    .toolbar { display: flex; gap: .8rem; margin-bottom: 1rem; }
+    .notice { padding: .8rem; margin: 1rem 0; border: 1px solid #8888; border-radius: .4rem; }
+    .table-scroll { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #8885; padding: .45rem .6rem; text-align: left; vertical-align: top; }
+    th { position: sticky; top: 0; background: Canvas; }
+    td { max-width: 32rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+    pre { overflow: auto; padding: 1rem; border-radius: .4rem; background: #8882; }
+  </style>
+</head>
+<body>
+  <nav aria-label="Breadcrumb">{{.Breadcrumb}}</nav>
+  <h1>{{.Name}}</h1>
+  <p><code>{{.RemotePath}}</code></p>
+  <div class="toolbar">
+    <a href="{{.RawURL}}">Raw</a>
+    {{if .SourceView}}<a href="{{.TableURL}}">Table</a>{{else}}<a href="{{.SourceURL}}">Source</a>{{end}}
+  </div>
+  {{if .LimitMessage}}<p class="notice" role="status">{{.LimitMessage}} <a href="{{.SourceURL}}">View full source</a></p>{{end}}
+  {{if .SourceView}}
+    <pre>{{.Source}}</pre>
+  {{else if .Empty}}
+    <p>Empty CSV/TSV file.</p>
+  {{else}}
+    <div class="table-scroll">
+      <table>
+        <thead><tr>{{range .Headers}}<th scope="col">{{.}}</th>{{end}}</tr></thead>
+        <tbody>
+          {{range .Rows}}<tr>{{range .}}<td>{{.}}</td>{{end}}</tr>{{else}}<tr><td colspan="{{len .Headers}}">No records.</td></tr>{{end}}
+        </tbody>
+      </table>
+    </div>
+  {{end}}
 </body>
 </html>`))
