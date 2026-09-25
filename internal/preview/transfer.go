@@ -30,6 +30,14 @@ type transferFS interface {
 	WriteFile(ctx context.Context, remotePath string, src io.Reader) error
 }
 
+// rangeStreamFS provides metadata without opening the file and a stream that
+// starts at the requested offset. Preview raw responses use this interface so
+// HEAD does not open a file and range reads do not materialize the whole file.
+type rangeStreamFS interface {
+	Size(ctx context.Context, remotePath string) (int64, error)
+	OpenRange(ctx context.Context, remotePath string, offset, length int64) (io.ReadCloser, error)
+}
+
 func copyWithContext(ctx context.Context, dst io.Writer, src io.Reader) (int64, error) {
 	buffer := make([]byte, 32*1024)
 	var copied int64

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +38,86 @@ func TestSSHRemoteFSAddsConnectionTimeout(t *testing.T) {
 	}
 	if !containsArg(commandArgs, "ConnectTimeout=7") {
 		t.Fatalf("ssh args do not contain connection timeout: %v", commandArgs)
+	}
+}
+
+func TestSSHRemoteFSSizeParsesPortableStatOutput(t *testing.T) {
+	remote := newSSHRemoteFS("remote-host")
+	var args []string
+	remote.command = func(ctx context.Context, _ string, commandArgs ...string) *exec.Cmd {
+		args = append([]string(nil), commandArgs...)
+		return exec.CommandContext(ctx, "sh", "-c", "printf 12345")
+	}
+	size, err := remote.Size(context.Background(), "/root/media.mp4")
+	if err != nil || size != 12345 {
+		t.Fatalf("size=%d error=%v, want 12345", size, err)
+	}
+	if !strings.Contains(strings.Join(args, " "), "stat -c %s") || !strings.Contains(strings.Join(args, " "), "stat -f %z") {
+		t.Fatalf("size command lacks Linux/BSD stat fallbacks: %v", args)
+	}
+}
+
+func TestSSHRemoteFSOpenRangeStreamsOnlyRemoteOffset(t *testing.T) {
+	contentPath := filepath.Join(t.TempDir(), "media.bin")
+	if err := os.WriteFile(contentPath, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("sh", "-c", remoteRangeReadScript, "sh", contentPath, "3", "4")
+	body, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "3456" {
+		t.Fatalf("remote range script output=%q, want only bytes 3-6", body)
+	}
+
+	var sshArgs []string
+	remote := newSSHRemoteFS("remote-host")
+	remote.command = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		sshArgs = append([]string(nil), args...)
+		return exec.CommandContext(ctx, "sh", "-c", "printf 3456")
+	}
+	stream, err := remote.OpenRange(context.Background(), "/root/media.bin", 3, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadAll(stream); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+	commandText := strings.Join(sshArgs, " ")
+	for _, want := range []string{"tail -c", "head -c", "offset=$2", "remote-host", "'3'", "'4'"} {
+		if !strings.Contains(commandText, want) {
+			t.Fatalf("SSH range command %q missing %q", commandText, want)
+		}
+	}
+}
+
+func TestSSHRemoteFSOpenRangeUsesRequestContextWithoutFixedTimeout(t *testing.T) {
+	remote := newSSHRemoteFS("remote-host")
+	remote.commandTimeout = 10 * time.Millisecond
+	var gotDeadline bool
+	remote.command = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		_, gotDeadline = ctx.Deadline()
+		return exec.CommandContext(ctx, "sh", "-c", "exec sleep 30")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := remote.OpenRange(ctx, "/root/media.mp4", 0, 10)
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	if gotDeadline {
+		cancel()
+		_ = stream.Close()
+		t.Fatal("stream command inherited the fixed command timeout")
+	}
+	cancel()
+	closeErr := stream.Close()
+	if !errors.Is(closeErr, context.Canceled) {
+		t.Fatalf("stream close error=%v, want request cancellation", closeErr)
 	}
 }
 

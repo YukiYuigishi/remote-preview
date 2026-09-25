@@ -6,7 +6,7 @@
 - local filesystem target（relative/absolute path）とremote home-relative target（`~` / relative path）を実装済み。
 - Phase 1–4（責務分割、target改善、context-aware system SSH、portable batch/on-demand directory listing cache）を実装済み。
 - `go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...` は成功している。
-- 次の主要課題は、ファイル全量読み込みとpreview fallback/HTTP品質（Phase 5）。転送機能はIssue 025で別スコープとして追加する。
+- Issue 030でraw/mediaのRange streamingとHEAD metadata responseを実装済み。text / structured-data previewは引き続きsource全体を読み込む。転送機能はIssue 025で別スコープとして追加した。
 - Issue 025のdownload/upload transferは実装済み。`-write` opt-in、個別/ZIP download、file/directory upload、8 MiB chunkのpause/resumeを提供し、rsyncのdelta転送は未実装のfull-file fallbackとする。
 - `cmd/ykview`は薄いentrypointで、アプリケーション実装は`internal/preview`に配置されている。
 - directory listingはforegroundで取得し、必要に応じてportable batch commandで直下分も同じSSHにまとめ、TTL cacheとsingleflightで再利用する。
@@ -21,7 +21,8 @@
 - GitHub Actionsはpush/PRで`make check`を実行し、`v*` tagでLinux/Darwinの4 platform release archiveを公開する。
 - `/bin/`、`/dist/`、`.codex/`などのローカル生成物はGit管理対象外とし、`internal/preview/remote_helpers/*.gz`はembedded artifactとして追跡する。
 - SVGのdirect previewはIssue 028で実装済み。通常のファイルリンクから`image/svg+xml`として表示する。
-- CSV / TSVのtable previewとJSON Lines表示はIssue 029で実装済み。audio / video previewとRange streamingはIssue 030で扱う。
+- CSV / TSVのtable previewとJSON Lines表示はIssue 029で実装済み。
+- audio/video previewとlocal/remoteのsingle byte-range streamingはIssue 030で実装済み。raw endpointはHEADのfile openを避け、remote Rangeはoffsetをremote側でskipする。
 
 ## Product decisions
 
@@ -119,8 +120,8 @@ Acceptance criteria:
 
 - Mermaidの動的importまたは描画失敗時は、rendered previewを隠してMarkdown sourceを再表示する。
 - Markdown rendererのCDN失敗時も同じfallback経路に統一する。
-- HEADで不要なファイル全量読み込みを避けられる設計にする。
-- サイズ上限、Range/streaming対応の要否を決める。少なくとも巨大ファイルを無制限に`[]byte`へ読み込まない。
+- raw file responseはlocal seekまたはremote-side offset skipでstream配信し、single byte rangeとHEAD metadata responseを処理する。media previewの対応codec拡張子はREADMEに記載する。
+- HTML/SVG、media、Raw endpointは大きなfileを`[]byte`へ読み込まずstreamする。textやstructured-data viewerは従来どおりsourceをpreview用に読み込む。
 - HTML/SVGの同一origin実行について、read-only個人用途のリスクと運用前提をREADMEに明記する。必要ならsandboxed previewまたはdownload扱いを追加する。
 
 Acceptance criteria:

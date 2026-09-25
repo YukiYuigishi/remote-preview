@@ -97,6 +97,51 @@ func (l *localRemoteFS) Open(ctx context.Context, localPath string) (io.ReadClos
 	return file, transferInfo{Kind: "file", Size: info.Size()}, nil
 }
 
+func (l *localRemoteFS) Size(ctx context.Context, localPath string) (int64, error) {
+	if err := contextError(ctx); err != nil {
+		return 0, err
+	}
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return 0, err
+	}
+	if !info.Mode().IsRegular() {
+		return 0, errors.New("only regular files can be streamed")
+	}
+	return info.Size(), nil
+}
+
+func (l *localRemoteFS) OpenRange(ctx context.Context, localPath string, offset, length int64) (io.ReadCloser, error) {
+	if err := contextError(ctx); err != nil {
+		return nil, err
+	}
+	if offset < 0 || length < -1 {
+		return nil, errors.New("invalid file range")
+	}
+	file, err := os.Open(localPath)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, errors.New("only regular files can be streamed")
+	}
+	if offset > info.Size() {
+		_ = file.Close()
+		return nil, errors.New("file range starts past end of file")
+	}
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return file, nil
+}
+
 func (l *localRemoteFS) MkdirAll(ctx context.Context, localPath string) error {
 	if err := contextError(ctx); err != nil {
 		return err

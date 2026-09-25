@@ -178,9 +178,52 @@ func (s *sshRemoteFS) Read(ctx context.Context, remotePath string) ([]byte, erro
 	return s.runNamed(ctx, "read", remotePath, "sh", "-c", script, "sh", remotePath)
 }
 
+func (s *sshRemoteFS) Size(ctx context.Context, remotePath string) (int64, error) {
+	script := `p=$1
+if size=$(stat -c %s "$p" 2>/dev/null); then
+  printf '%s' "$size"
+elif size=$(stat -f %z "$p" 2>/dev/null); then
+  printf '%s' "$size"
+else
+  printf '%s\n' 'remote stat command is unavailable' >&2
+  exit 1
+fi`
+	out, err := s.runNamed(ctx, "size", remotePath, "sh", "-c", script, "sh", remotePath)
+	if err != nil {
+		return 0, err
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil || size < 0 {
+		return 0, fmt.Errorf("invalid remote file size %q", strings.TrimSpace(string(out)))
+	}
+	return size, nil
+}
+
+const remoteRangeReadScript = `p=$1
+offset=$2
+length=$3
+if [ "$offset" -gt 0 ]; then
+  start=$((offset + 1))
+  if [ "$length" -ge 0 ]; then
+    tail -c "+$start" "$p" | head -c "$length"
+  else
+    exec tail -c "+$start" "$p"
+  fi
+elif [ "$length" -ge 0 ]; then
+  exec head -c "$length" "$p"
+else
+  exec cat -- "$p"
+fi`
+
+func (s *sshRemoteFS) OpenRange(ctx context.Context, remotePath string, offset, length int64) (io.ReadCloser, error) {
+	if offset < 0 || length < -1 {
+		return nil, fmt.Errorf("invalid file range")
+	}
+	return s.openNamed(ctx, "range_read", remotePath, "sh", "-c", remoteRangeReadScript, "sh", remotePath, strconv.FormatInt(offset, 10), strconv.FormatInt(length, 10))
+}
+
 func (s *sshRemoteFS) Open(ctx context.Context, remotePath string) (io.ReadCloser, transferInfo, error) {
-	script := `p=$1; exec cat -- "$p"`
-	stream, err := s.openNamed(ctx, "download", remotePath, "sh", "-c", script, "sh", remotePath)
+	stream, err := s.OpenRange(ctx, remotePath, 0, -1)
 	if err != nil {
 		return nil, transferInfo{}, err
 	}
@@ -766,11 +809,22 @@ func (s *sshRemoteFS) newSSHCommand(ctx context.Context, compression bool, args 
 	if commandTimeout <= 0 {
 		commandTimeout = 30 * time.Second
 	}
+	return s.newSSHCommandWithTimeout(ctx, compression, commandTimeout, args...)
+}
+
+func (s *sshRemoteFS) newSSHCommandWithTimeout(ctx context.Context, compression bool, timeout time.Duration, args ...string) (*exec.Cmd, context.Context, context.CancelFunc) {
 	connectTimeout := s.connectTimeout
 	if connectTimeout <= 0 {
-		connectTimeout = commandTimeout
+		connectTimeout = timeout
+		if connectTimeout <= 0 {
+			connectTimeout = 30 * time.Second
+		}
 	}
-	runCtx, cancel := context.WithTimeout(ctx, commandTimeout)
+	runCtx := ctx
+	cancel := func() {}
+	if timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
 
 	sshArgs := []string{"-T"}
 	if compression {
@@ -801,7 +855,9 @@ func (s *sshRemoteFS) newSSHCommand(ctx context.Context, compression bool, args 
 
 func (s *sshRemoteFS) openNamed(ctx context.Context, operation, remotePath string, args ...string) (io.ReadCloser, error) {
 	started := time.Now()
-	cmd, runCtx, cancel := s.newSSHCommand(ctx, false, args...)
+	// A media range or file download can legitimately take longer than the
+	// short command timeout. Its HTTP request context controls the process life.
+	cmd, runCtx, cancel := s.newSSHCommandWithTimeout(ctx, false, 0, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()

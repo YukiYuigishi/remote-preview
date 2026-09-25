@@ -2,10 +2,39 @@ package preview
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestLocalRemoteFSSizeAndOpenRange(t *testing.T) {
+	root := t.TempDir()
+	mediaPath := filepath.Join(root, "track.mp3")
+	content := []byte("0123456789")
+	if err := os.WriteFile(mediaPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	local := newLocalRemoteFS()
+	size, err := local.Size(context.Background(), mediaPath)
+	if err != nil || size != int64(len(content)) {
+		t.Fatalf("Size=%d error=%v, want %d", size, err, len(content))
+	}
+	reader, err := local.OpenRange(context.Background(), mediaPath, 4, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, readErr := io.ReadAll(io.LimitReader(reader, 3))
+	closeErr := reader.Close()
+	if readErr != nil || closeErr != nil || string(body) != "456" {
+		t.Fatalf("range body=%q read=%v close=%v", body, readErr, closeErr)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := local.OpenRange(ctx, mediaPath, 0, 1); err != context.Canceled {
+		t.Fatalf("canceled OpenRange error=%v, want context canceled", err)
+	}
+}
 
 func TestLocalRemoteFSKindListAndRead(t *testing.T) {
 	root := t.TempDir()

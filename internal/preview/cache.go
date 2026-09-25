@@ -271,6 +271,22 @@ func (c *cachedRemoteFS) Open(ctx context.Context, remotePath string) (io.ReadCl
 	return backend.Open(ctx, remotePath)
 }
 
+func (c *cachedRemoteFS) Size(ctx context.Context, remotePath string) (int64, error) {
+	backend, ok := c.backend.(rangeStreamFS)
+	if !ok {
+		return 0, fmt.Errorf("streaming backend is unavailable")
+	}
+	return backend.Size(ctx, remotePath)
+}
+
+func (c *cachedRemoteFS) OpenRange(ctx context.Context, remotePath string, offset, length int64) (io.ReadCloser, error) {
+	backend, ok := c.backend.(rangeStreamFS)
+	if !ok {
+		return nil, fmt.Errorf("streaming backend is unavailable")
+	}
+	return backend.OpenRange(ctx, remotePath, offset, length)
+}
+
 func (c *cachedRemoteFS) MkdirAll(ctx context.Context, remotePath string) error {
 	backend, ok := c.backend.(transferFS)
 	if !ok {
