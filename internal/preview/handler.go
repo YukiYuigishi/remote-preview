@@ -185,6 +185,11 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, rel, remoteP
 		return
 	}
 
+	if isSVG(remotePath) {
+		serveRaw(w, r, remotePath, data)
+		return
+	}
+
 	if isTextFile(remotePath, data) {
 		h.serveText(w, r, rel, remotePath, data)
 		return
@@ -263,7 +268,9 @@ func (h *handler) serveText(w http.ResponseWriter, r *http.Request, rel, remoteP
 }
 
 func serveRaw(w http.ResponseWriter, r *http.Request, remotePath string, data []byte) {
-	if ctype := mime.TypeByExtension(strings.ToLower(path.Ext(remotePath))); ctype != "" {
+	if isSVG(remotePath) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+	} else if ctype := mime.TypeByExtension(strings.ToLower(path.Ext(remotePath))); ctype != "" {
 		w.Header().Set("Content-Type", ctype)
 	} else {
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -301,6 +308,10 @@ func isImage(p string) bool {
 	default:
 		return false
 	}
+}
+
+func isSVG(p string) bool {
+	return strings.EqualFold(path.Ext(p), ".svg")
 }
 
 func isPlainText(p string) bool {

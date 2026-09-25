@@ -76,6 +76,47 @@ func TestHandlerServesHTMLFileDirectly(t *testing.T) {
 	}
 }
 
+func TestHandlerServesSVGFileDirectly(t *testing.T) {
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg"><text>diagram</text></svg>`)
+	backend := newFakeRemoteFS()
+	backend.kinds["/root/diagram.svg"] = "file"
+	backend.kinds["/root/diagram.SVG"] = "file"
+	backend.reads["/root/diagram.svg"] = svg
+	backend.reads["/root/diagram.SVG"] = svg
+	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: backend}
+
+	for _, test := range []struct {
+		name string
+		url  string
+	}{
+		{name: "normal lowercase extension", url: "/diagram.svg"},
+		{name: "normal uppercase extension", url: "/diagram.SVG"},
+		{name: "raw uppercase extension", url: "/diagram.SVG?raw=1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.url, nil))
+
+			if response.Code != http.StatusOK {
+				t.Fatalf("status=%d, want 200", response.Code)
+			}
+			if got := response.Header().Get("Content-Type"); got != "image/svg+xml" {
+				t.Fatalf("content type=%q, want image/svg+xml", got)
+			}
+			if got := response.Body.Bytes(); string(got) != string(svg) {
+				t.Fatalf("SVG response=%q, want exact source bytes", got)
+			}
+			if strings.Contains(response.Body.String(), "source-code") {
+				t.Fatal("SVG file was rendered by the text viewer")
+			}
+		})
+	}
+
+	if !isImage("diagram.SVG") {
+		t.Fatal("SVG should retain image classification in directory listings")
+	}
+}
+
 func TestHandlerKeepsBinaryFileAsRaw(t *testing.T) {
 	backend := newFakeRemoteFS()
 	backend.kinds["/root/archive.bin"] = "file"
