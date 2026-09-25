@@ -39,17 +39,6 @@
 - request cancellationでlocal fileとSSH commandを終了する。
 - 既存のdownload/upload、HTML、SVG、Markdown、text previewを壊さない。
 
-## Verification
-
-- Range parserとresponse headerのunit test
-- local / fake remoteによるfull、HEAD、partial response test
-- remote streaming commandのargumentとcancellation test
-- audio / video handler test
-- `go test ./...`
-- `go test -race ./...`
-- `go vet ./...`
-- `go build ./...`
-
 ## Current state
 
 - Implemented.
