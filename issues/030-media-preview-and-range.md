@@ -52,6 +52,17 @@
 
 ## Current state
 
-- Planned.
-- Phase 5のfile streaming / Range設計をこのissueで実装する。
+- Implemented.
+- media extensionはfile bodyを読む前にaudio/video viewerへ分類する。codecに対応しないbrowser向けにRawとDownloadを表示する。
+- local backendはstat + seek streamを使い、SSH backendはLinux/BSD statとremote-side tail/headによるoffset skipを使う。
+- raw responseはsingle Range、open-ended/suffix range、416、HEADを処理する。streaming SSH commandは固定command timeoutを使わず、request contextで終了する。
 
+## Verification
+
+- `go test ./...` — pass
+- `go test -race ./...` — pass
+- `go vet ./...` — pass
+- `go build ./...` — pass
+- Range parser / response test covers normal, open-ended, suffix, clamped end, unsatisfiable and multi-range rejection.
+- Local and fake remote tests cover full response, HEAD without `OpenRange`, partial response, media viewer without `Read`, and content MIME.
+- Remote range script test confirms that only requested bytes are emitted; SSH stream test confirms request cancellation and no fixed command deadline.

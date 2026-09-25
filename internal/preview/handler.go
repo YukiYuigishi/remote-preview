@@ -2,8 +2,10 @@ package preview
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -123,6 +126,12 @@ func (h *handler) serveDirectory(w http.ResponseWriter, r *http.Request, rel, re
 			kindLabel = "TSV table"
 		} else if isJSONLines(entry.Name) {
 			kindLabel = "JSON lines"
+		} else if isAudio(entry.Name) {
+			icon = "🔊"
+			kindLabel = "audio"
+		} else if isVideo(entry.Name) {
+			icon = "🎞️"
+			kindLabel = "video"
 		} else if isPlainText(entry.Name) {
 			kindLabel = "text"
 		}
@@ -174,14 +183,43 @@ func (h *handler) serveDirectory(w http.ResponseWriter, r *http.Request, rel, re
 }
 
 func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, rel, remotePath string) {
-	data, err := h.remote.Read(r.Context(), remotePath)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+	if r.Method == http.MethodHead {
+		if isMedia(remotePath) && r.URL.Query().Get("raw") != "1" {
+			h.serveMedia(w, r, rel, remotePath)
+			return
+		}
+		if r.URL.Query().Get("raw") == "1" || isHTML(remotePath) || isSVG(remotePath) || (!isMarkdown(remotePath) && !isCSV(remotePath) && !isTSV(remotePath) && !isPlainText(remotePath)) {
+			h.serveRawFile(w, r, remotePath)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		return
+	}
+	if isMedia(remotePath) && r.URL.Query().Get("raw") != "1" {
+		h.serveMedia(w, r, rel, remotePath)
+		return
+	}
+	if r.URL.Query().Get("raw") == "1" || isHTML(remotePath) || isSVG(remotePath) {
+		h.serveRawFile(w, r, remotePath)
 		return
 	}
 
-	if r.URL.Query().Get("raw") == "1" {
-		serveRaw(w, r, remotePath, data)
+	if !isPlainText(remotePath) && !isCSV(remotePath) && !isTSV(remotePath) && !isJSONLines(remotePath) {
+		prefix, err := h.readFilePrefix(r.Context(), remotePath, 1024)
+		if err != nil {
+			h.fileReadError(w, err)
+			return
+		}
+		if !isLikelyText(prefix) {
+			h.serveRawFile(w, r, remotePath)
+			return
+		}
+	}
+
+	data, err := h.remote.Read(r.Context(), remotePath)
+	if err != nil {
+		h.fileReadError(w, err)
 		return
 	}
 
@@ -190,15 +228,6 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, rel, remoteP
 		return
 	}
 
-	if isHTML(remotePath) {
-		serveRaw(w, r, remotePath, data)
-		return
-	}
-
-	if isSVG(remotePath) {
-		serveRaw(w, r, remotePath, data)
-		return
-	}
 	if isCSV(remotePath) {
 		h.serveDelimited(w, r, remotePath, data, ',')
 		return
@@ -213,7 +242,236 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, rel, remoteP
 		return
 	}
 
-	serveRaw(w, r, remotePath, data)
+	h.serveRawFile(w, r, remotePath)
+}
+
+func (h *handler) fileReadError(w http.ResponseWriter, err error) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
+	http.Error(w, err.Error(), http.StatusBadGateway)
+}
+
+func (h *handler) serveMedia(w http.ResponseWriter, r *http.Request, rel, remotePath string) {
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		return
+	}
+	mediaKind := "audio"
+	if isVideo(remotePath) {
+		mediaKind = "video"
+	}
+	data := struct {
+		Name        string
+		Host        string
+		RemotePath  string
+		Breadcrumb  template.HTML
+		Kind        string
+		ContentType string
+		RawURL      string
+		DownloadURL string
+	}{
+		Name:        path.Base(remotePath),
+		Host:        h.target.Host,
+		RemotePath:  remotePath,
+		Breadcrumb:  breadcrumbHTML(r.URL.EscapedPath(), false),
+		Kind:        mediaKind,
+		ContentType: explicitMediaType(remotePath),
+		RawURL:      withQueryValue(r.URL, "raw", "1"),
+		DownloadURL: transferURLPrefix + "download?path=" + url.QueryEscape(rel),
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := mediaTemplate.Execute(w, data); err != nil {
+		slog.Error("render media preview", "error", err)
+	}
+}
+
+func (h *handler) readFilePrefix(ctx context.Context, remotePath string, limit int64) ([]byte, error) {
+	if source := h.rangeSource(); source != nil {
+		size, err := source.Size(ctx, remotePath)
+		if err != nil {
+			return nil, err
+		}
+		if size > limit {
+			size = limit
+		}
+		reader, err := source.OpenRange(ctx, remotePath, 0, size)
+		if err != nil {
+			return nil, err
+		}
+		defer reader.Close()
+		return io.ReadAll(io.LimitReader(reader, limit))
+	}
+	data, err := h.remote.Read(ctx, remotePath)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		data = data[:limit]
+	}
+	return data, nil
+}
+
+func (h *handler) rangeSource() rangeStreamFS {
+	if source, ok := h.remote.(rangeStreamFS); ok && supportsRangeStream(h.remote) {
+		return source
+	}
+	if source, ok := h.transfer.(rangeStreamFS); ok && supportsRangeStream(h.transfer) {
+		return source
+	}
+	return nil
+}
+
+func supportsRangeStream(filesystem any) bool {
+	if cached, ok := filesystem.(*cachedRemoteFS); ok {
+		return supportsRangeStream(cached.backend)
+	}
+	_, ok := filesystem.(rangeStreamFS)
+	return ok
+}
+
+func (h *handler) serveRawFile(w http.ResponseWriter, r *http.Request, remotePath string) {
+	contentType := rawContentType(remotePath)
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Accept-Ranges", "bytes")
+
+	source := h.rangeSource()
+	var size int64
+	var buffered []byte
+	if source != nil {
+		var err error
+		size, err = source.Size(r.Context(), remotePath)
+		if err != nil {
+			h.fileReadError(w, err)
+			return
+		}
+	} else if r.Method == http.MethodHead {
+		// Legacy RemoteFS fakes do not necessarily expose size metadata. Keep
+		// HEAD free of reads and opens when the backend cannot answer its size.
+		return
+	} else {
+		var err error
+		buffered, err = h.remote.Read(r.Context(), remotePath)
+		if err != nil {
+			h.fileReadError(w, err)
+			return
+		}
+		size = int64(len(buffered))
+	}
+
+	var start, end int64
+	partial := false
+	rangeValues := r.Header.Values("Range")
+	if len(rangeValues) > 0 && strings.TrimSpace(strings.Join(rangeValues, ",")) != "" {
+		var err error
+		if len(rangeValues) != 1 {
+			err = fmt.Errorf("multiple Range headers are not supported")
+		} else {
+			start, end, err = parseSingleByteRange(rangeValues[0], size)
+		}
+		if err != nil {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", size))
+			w.Header().Set("Content-Length", "0")
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		partial = true
+	} else if size > 0 {
+		end = size - 1
+	}
+	length := int64(0)
+	if size > 0 {
+		length = end - start + 1
+	}
+	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+	if partial {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
+	}
+	if r.Method == http.MethodHead || length == 0 {
+		if partial {
+			w.WriteHeader(http.StatusPartialContent)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+		return
+	}
+
+	var reader io.ReadCloser
+	if source != nil {
+		var err error
+		reader, err = source.OpenRange(r.Context(), remotePath, start, length)
+		if err != nil {
+			h.fileReadError(w, err)
+			return
+		}
+	} else {
+		reader = io.NopCloser(bytes.NewReader(buffered[start : start+length]))
+	}
+	defer reader.Close()
+	if partial {
+		w.WriteHeader(http.StatusPartialContent)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+	if _, err := copyWithContext(r.Context(), w, io.LimitReader(reader, length)); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		slog.Debug("raw file stream ended with error", "remote_path", remotePath, "error", err)
+	}
+}
+
+func parseSingleByteRange(header string, size int64) (int64, int64, error) {
+	if size < 0 {
+		return 0, 0, fmt.Errorf("invalid file size")
+	}
+	unit, spec, ok := strings.Cut(strings.TrimSpace(header), "=")
+	if !ok || !strings.EqualFold(strings.TrimSpace(unit), "bytes") || strings.Contains(spec, ",") {
+		return 0, 0, fmt.Errorf("unsupported byte range %q", header)
+	}
+	spec = strings.TrimSpace(spec)
+	left, right, ok := strings.Cut(spec, "-")
+	if !ok || strings.Contains(right, "-") || (left == "" && right == "") || size == 0 {
+		return 0, 0, fmt.Errorf("unsatisfiable byte range %q", header)
+	}
+	if left == "" {
+		suffix, err := parseUnsignedRangeNumber(right)
+		if err != nil || suffix == 0 {
+			return 0, 0, fmt.Errorf("unsatisfiable byte range %q", header)
+		}
+		start := int64(0)
+		if suffix < size {
+			start = size - suffix
+		}
+		return start, size - 1, nil
+	}
+	start, err := parseUnsignedRangeNumber(left)
+	if err != nil || start >= size {
+		return 0, 0, fmt.Errorf("unsatisfiable byte range %q", header)
+	}
+	end := size - 1
+	if right != "" {
+		requestedEnd, parseErr := parseUnsignedRangeNumber(right)
+		if parseErr != nil || requestedEnd < start {
+			return 0, 0, fmt.Errorf("unsatisfiable byte range %q", header)
+		}
+		if requestedEnd < end {
+			end = requestedEnd
+		}
+	}
+	return start, end, nil
+}
+
+func parseUnsignedRangeNumber(value string) (int64, error) {
+	if value == "" {
+		return 0, fmt.Errorf("empty range number")
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return 0, fmt.Errorf("invalid range number %q", value)
+		}
+	}
+	return strconv.ParseInt(value, 10, 64)
 }
 
 func (h *handler) serveMarkdown(w http.ResponseWriter, r *http.Request, rel, remotePath string, source []byte) {
@@ -478,20 +736,33 @@ func withQueryValue(u *url.URL, key, value string) string {
 	return copy.RequestURI()
 }
 
-func serveRaw(w http.ResponseWriter, r *http.Request, remotePath string, data []byte) {
-	if isSVG(remotePath) {
-		w.Header().Set("Content-Type", "image/svg+xml")
-	} else if ctype := mime.TypeByExtension(strings.ToLower(path.Ext(remotePath))); ctype != "" {
-		w.Header().Set("Content-Type", ctype)
-	} else {
-		w.Header().Set("Content-Type", "application/octet-stream")
+var explicitMediaTypes = map[string]string{
+	".mp3":  "audio/mpeg",
+	".wav":  "audio/wav",
+	".ogg":  "audio/ogg",
+	".m4a":  "audio/mp4",
+	".flac": "audio/flac",
+	".mp4":  "video/mp4",
+	".webm": "video/webm",
+	".mov":  "video/quicktime",
+	".ogv":  "video/ogg",
+}
+
+func explicitMediaType(p string) string {
+	return explicitMediaTypes[strings.ToLower(path.Ext(p))]
+}
+
+func rawContentType(p string) string {
+	if mediaType := explicitMediaType(p); mediaType != "" {
+		return mediaType
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
-	if r.Method == http.MethodHead {
-		return
+	if isSVG(p) {
+		return "image/svg+xml"
 	}
-	_, _ = w.Write(data)
+	if contentType := mime.TypeByExtension(strings.ToLower(path.Ext(p))); contentType != "" {
+		return contentType
+	}
+	return "application/octet-stream"
 }
 
 func isMarkdown(p string) bool {
@@ -519,6 +790,28 @@ func isImage(p string) bool {
 	default:
 		return false
 	}
+}
+
+func isAudio(p string) bool {
+	switch strings.ToLower(path.Ext(p)) {
+	case ".mp3", ".wav", ".ogg", ".m4a", ".flac":
+		return true
+	default:
+		return false
+	}
+}
+
+func isVideo(p string) bool {
+	switch strings.ToLower(path.Ext(p)) {
+	case ".mp4", ".webm", ".mov", ".ogv":
+		return true
+	default:
+		return false
+	}
+}
+
+func isMedia(p string) bool {
+	return isAudio(p) || isVideo(p)
 }
 
 func isSVG(p string) bool {

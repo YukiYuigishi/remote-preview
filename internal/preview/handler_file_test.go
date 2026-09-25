@@ -1,11 +1,44 @@
 package preview
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+type fakeRangeRemoteFS struct {
+	*fakeRemoteFS
+	content   []byte
+	sizeCalls int
+	openCalls int
+	ranges    [][2]int64
+}
+
+func (f *fakeRangeRemoteFS) Size(context.Context, string) (int64, error) {
+	f.sizeCalls++
+	return int64(len(f.content)), nil
+}
+
+func (f *fakeRangeRemoteFS) OpenRange(_ context.Context, _ string, offset, length int64) (io.ReadCloser, error) {
+	f.openCalls++
+	f.ranges = append(f.ranges, [2]int64{offset, length})
+	end := int64(len(f.content))
+	if length >= 0 && offset+length < end {
+		end = offset + length
+	}
+	if offset > int64(len(f.content)) || end < offset {
+		return nil, errors.New("invalid range")
+	}
+	return io.NopCloser(bytes.NewReader(f.content[offset:end])), nil
+}
 
 func TestHandlerServesKnownTextFileInBrowser(t *testing.T) {
 	backend := newFakeRemoteFS()
@@ -27,6 +60,198 @@ func TestHandlerServesKnownTextFileInBrowser(t *testing.T) {
 	}
 	if strings.Contains(response.Header().Get("Content-Disposition"), "attachment") {
 		t.Fatal("text file should not be an attachment")
+	}
+}
+
+func TestHandlerServesMediaViewerBeforeReadingFile(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		contentType string
+		viewer      string
+	}{
+		{name: "track.MP3", contentType: "audio/mpeg", viewer: `<audio controls preload="metadata">`},
+		{name: "clip.MOV", contentType: "video/quicktime", viewer: `<video controls preload="metadata">`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			backend := newFakeRemoteFS()
+			remotePath := "/root/" + test.name
+			backend.kinds[remotePath] = "file"
+			backend.readErr[remotePath] = errors.New("media content should not be read for the viewer")
+			h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: backend}
+
+			response := httptest.NewRecorder()
+			h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/"+test.name, nil))
+			body := response.Body.String()
+			if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "text/html; charset=utf-8" {
+				t.Fatalf("response=%d content-type=%q body=%q", response.Code, response.Header().Get("Content-Type"), body)
+			}
+			for _, want := range []string{test.viewer, test.contentType, "raw=1", "Download", "cannot play this"} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("media viewer missing %q: %q", want, body)
+				}
+			}
+		})
+	}
+}
+
+func TestHandlerHEADDoesNotReadPreviewFile(t *testing.T) {
+	backend := newFakeRemoteFS()
+	backend.kinds["/root/notes.txt"] = "file"
+	backend.readErr["/root/notes.txt"] = errors.New("HEAD must not read file contents")
+	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: backend}
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, httptest.NewRequest(http.MethodHead, "/notes.txt", nil))
+	if response.Code != http.StatusOK || response.Body.Len() != 0 || response.Header().Get("Content-Type") != "text/html; charset=utf-8" {
+		t.Fatalf("HEAD response=%d content-type=%q body=%q", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+	}
+}
+
+func TestHandlerStreamsRawRangesAndKeepsHEADOpenFree(t *testing.T) {
+	base := newFakeRemoteFS()
+	base.kinds["/root/track.mp3"] = "file"
+	backend := &fakeRangeRemoteFS{fakeRemoteFS: base, content: []byte("0123456789")}
+	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: backend}
+
+	full := httptest.NewRecorder()
+	h.ServeHTTP(full, httptest.NewRequest(http.MethodGet, "/track.mp3?raw=1", nil))
+	if full.Code != http.StatusOK || full.Body.String() != "0123456789" || full.Header().Get("Content-Type") != "audio/mpeg" || full.Header().Get("Accept-Ranges") != "bytes" || full.Header().Get("Content-Length") != "10" {
+		t.Fatalf("full response=%d headers=%v body=%q", full.Code, full.Header(), full.Body.String())
+	}
+
+	head := httptest.NewRecorder()
+	h.ServeHTTP(head, httptest.NewRequest(http.MethodHead, "/track.mp3?raw=1", nil))
+	if head.Code != http.StatusOK || head.Body.Len() != 0 || head.Header().Get("Content-Length") != "10" {
+		t.Fatalf("HEAD response=%d headers=%v body=%q", head.Code, head.Header(), head.Body.String())
+	}
+	if backend.openCalls != 1 {
+		t.Fatalf("open calls after HEAD=%d, want only the full GET", backend.openCalls)
+	}
+
+	for _, test := range []struct {
+		header     string
+		wantBody   string
+		wantRange  string
+		wantOffset int64
+		wantLength int64
+	}{
+		{header: "bytes=2-5", wantBody: "2345", wantRange: "bytes 2-5/10", wantOffset: 2, wantLength: 4},
+		{header: "bytes=7-", wantBody: "789", wantRange: "bytes 7-9/10", wantOffset: 7, wantLength: 3},
+		{header: "bytes=-4", wantBody: "6789", wantRange: "bytes 6-9/10", wantOffset: 6, wantLength: 4},
+	} {
+		request := httptest.NewRequest(http.MethodGet, "/track.mp3?raw=1", nil)
+		request.Header.Set("Range", test.header)
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, request)
+		if response.Code != http.StatusPartialContent || response.Body.String() != test.wantBody || response.Header().Get("Content-Range") != test.wantRange || response.Header().Get("Content-Length") != strconv.FormatInt(test.wantLength, 10) {
+			t.Fatalf("Range %q response=%d headers=%v body=%q", test.header, response.Code, response.Header(), response.Body.String())
+		}
+		got := backend.ranges[len(backend.ranges)-1]
+		if got != ([2]int64{test.wantOffset, test.wantLength}) {
+			t.Fatalf("Range %q opened offset/length=%v", test.header, got)
+		}
+	}
+
+	unsatisfiable := httptest.NewRequest(http.MethodGet, "/track.mp3?raw=1", nil)
+	unsatisfiable.Header.Set("Range", "bytes=10-")
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, unsatisfiable)
+	if response.Code != http.StatusRequestedRangeNotSatisfiable || response.Header().Get("Content-Range") != "bytes */10" || response.Body.Len() != 0 {
+		t.Fatalf("416 response=%d headers=%v body=%q", response.Code, response.Header(), response.Body.String())
+	}
+	if backend.openCalls != 4 {
+		t.Fatalf("range open calls=%d, want full GET plus three valid ranges", backend.openCalls)
+	}
+}
+
+func TestLocalHandlerStreamsRawByteRange(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("0123456789")
+	if err := os.WriteFile(filepath.Join(root, "track.mp3"), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	local := newCachedRemoteFS(newLocalRemoteFS(), "local")
+	h := &handler{target: remoteTarget{Host: "local", Root: root}, remote: local, transfer: local}
+
+	for _, test := range []struct {
+		method     string
+		rangeValue string
+		status     int
+		body       string
+		contentLen string
+		contentRng string
+	}{
+		{method: http.MethodGet, status: http.StatusOK, body: string(content), contentLen: "10"},
+		{method: http.MethodHead, status: http.StatusOK, contentLen: "10"},
+		{method: http.MethodGet, rangeValue: "bytes=4-6", status: http.StatusPartialContent, body: "456", contentLen: "3", contentRng: "bytes 4-6/10"},
+	} {
+		request := httptest.NewRequest(test.method, "/track.mp3?raw=1", nil)
+		if test.rangeValue != "" {
+			request.Header.Set("Range", test.rangeValue)
+		}
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, request)
+		if response.Code != test.status || response.Body.String() != test.body || response.Header().Get("Content-Length") != test.contentLen || response.Header().Get("Content-Range") != test.contentRng {
+			t.Fatalf("%s Range %q response=%d headers=%v body=%q", test.method, test.rangeValue, response.Code, response.Header(), response.Body.String())
+		}
+	}
+}
+
+func TestHandlerKeepsLegacyFakeRemoteRangeFallback(t *testing.T) {
+	backend := newFakeRemoteFS()
+	backend.kinds["/root/archive.bin"] = "file"
+	backend.reads["/root/archive.bin"] = []byte("abcdef")
+	cached := newCachedRemoteFS(backend, "remote-host")
+	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: cached}
+	request := httptest.NewRequest(http.MethodGet, "/archive.bin?raw=1", nil)
+	request.Header.Set("Range", "bytes=2-4")
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusPartialContent || response.Body.String() != "cde" || response.Header().Get("Content-Range") != "bytes 2-4/6" {
+		t.Fatalf("legacy fake response=%d headers=%v body=%q", response.Code, response.Header(), response.Body.String())
+	}
+}
+
+func TestMediaClassificationAndExplicitContentTypes(t *testing.T) {
+	for _, name := range []string{"a.mp3", "a.wav", "a.ogg", "a.m4a", "a.flac"} {
+		if !isAudio(name) || isVideo(name) || !strings.HasPrefix(explicitMediaType(name), "audio/") {
+			t.Errorf("audio classification/type failed for %q: audio=%v video=%v type=%q", name, isAudio(name), isVideo(name), explicitMediaType(name))
+		}
+	}
+	for _, name := range []string{"a.mp4", "a.webm", "a.mov", "a.ogv"} {
+		if !isVideo(name) || isAudio(name) || !strings.HasPrefix(explicitMediaType(name), "video/") {
+			t.Errorf("video classification/type failed for %q: audio=%v video=%v type=%q", name, isAudio(name), isVideo(name), explicitMediaType(name))
+		}
+	}
+}
+
+func TestParseSingleByteRange(t *testing.T) {
+	for _, test := range []struct {
+		header    string
+		size      int64
+		start     int64
+		end       int64
+		wantError bool
+	}{
+		{header: "bytes=3-7", size: 10, start: 3, end: 7},
+		{header: "bytes=7-", size: 10, start: 7, end: 9},
+		{header: "bytes=-4", size: 10, start: 6, end: 9},
+		{header: "bytes=3-99", size: 10, start: 3, end: 9},
+		{header: "bytes=10-", size: 10, wantError: true},
+		{header: "bytes=-0", size: 10, wantError: true},
+		{header: "bytes=0-1,4-5", size: 10, wantError: true},
+		{header: "items=0-1", size: 10, wantError: true},
+		{header: "bytes=0-", size: 0, wantError: true},
+	} {
+		start, end, err := parseSingleByteRange(test.header, test.size)
+		if test.wantError {
+			if err == nil {
+				t.Errorf("parseSingleByteRange(%q, %d) unexpectedly succeeded", test.header, test.size)
+			}
+			continue
+		}
+		if err != nil || start != test.start || end != test.end {
+			t.Errorf("parseSingleByteRange(%q, %d)=(%d,%d,%v), want (%d,%d,nil)", test.header, test.size, start, end, err, test.start, test.end)
+		}
 	}
 }
 
@@ -240,13 +465,15 @@ func TestDirectoryListingClassifiesStructuredData(t *testing.T) {
 		{Name: "data.tsv", Kind: "file"},
 		{Name: "events.jsonl", Kind: "file"},
 		{Name: "events.ndjson", Kind: "file"},
+		{Name: "track.flac", Kind: "file"},
+		{Name: "clip.webm", Kind: "file"},
 	}
 	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: backend}
 
 	response := httptest.NewRecorder()
 	h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
 	body := response.Body.String()
-	for _, want := range []string{"CSV table", "TSV table", "JSON lines"} {
+	for _, want := range []string{"CSV table", "TSV table", "JSON lines", "audio", "video"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("directory listing missing %q: %q", want, body)
 		}

@@ -28,6 +28,9 @@ SSH先またはlocal filesystemを、ローカルブラウザから閲覧・down
   - autolinks
 - ` ```mermaid ` fenced code blockをMermaidとして描画
 - PNG/JPEG/WebP/SVGなど: そのまま表示
+- MP3/WAV/OGG/M4A/FLAC: audio viewerで再生
+- MP4/WebM/MOV/OGV: video viewerで再生
+- Raw endpointはlocal/remoteでstream配信し、単一byte rangeとHEADに対応
 - CSV/TSV: table preview（表示上限あり、source表示へ切り替え可能）
 - JSON Lines（`.jsonl` / `.ndjson`）: JSON syntax highlight付きtext viewer
 - source code / JSON / YAML / textなど: browser内text viewer
@@ -40,6 +43,7 @@ SSH先またはlocal filesystemを、ローカルブラウザから閲覧・down
 - directory listingのTTL cacheと同時アクセスの重複抑制
 - macOS / BusyBox互換のforeground batch listing
 - SSH command/connect timeoutとrequest context cancellation
+- media streamはrequest cancellationまで継続し、remote RangeはoffsetをSSH stdoutより前にremote側でskip
 - read-only（既定。uploadは`-write`指定時だけ有効）
 
 ## Quick start (macOS Apple Silicon)
@@ -264,7 +268,7 @@ Remote filesystem
 - directory listingはGo helperまたはportable remote shellを使う
 - directory listing cacheの既定TTLは10秒、最大256エントリ
 - batch listingのprotocolはtab/newlineを含むfilenameを保持する。single-directory shell fallbackではnewlineを含むfilenameを完全には扱えない
-- Range request未対応
+- media codecの再生可否はbrowserに依存する。再生できない場合はviewer内のRawまたはDownloadを使う
 - live reload未対応
 - file edit / rename / deleteは未対応
 - rsyncのremote依存やdelta block転送は行わず、uploadは必要に応じてfull-file transferへfallbackする

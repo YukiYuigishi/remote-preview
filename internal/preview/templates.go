@@ -368,3 +368,38 @@ var delimitedTemplate = template.Must(template.New("delimited").Parse(`<!doctype
   {{end}}
 </body>
 </html>`))
+
+var mediaTemplate = template.Must(template.New("media").Parse(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Name}} · {{.Host}}</title>
+  <style>
+    :root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
+    body { max-width: 1000px; margin: 0 auto; padding: 1rem; }
+    nav { margin-bottom: 1rem; overflow-wrap: anywhere; }
+    nav a { text-decoration: none; }
+    .toolbar { display: flex; gap: .8rem; margin-bottom: 1rem; }
+    audio, video { display: block; width: min(100%, 60rem); margin: 1rem 0; }
+    video { max-height: 75vh; background: #000; }
+  </style>
+</head>
+<body>
+  <nav aria-label="Breadcrumb">{{.Breadcrumb}}</nav>
+  <h1>{{.Name}}</h1>
+  <p><code>{{.RemotePath}}</code></p>
+  <div class="toolbar"><a href="{{.RawURL}}">Raw</a><a href="{{.DownloadURL}}">Download</a></div>
+  {{if eq .Kind "audio"}}
+    <audio controls preload="metadata">
+      <source src="{{.RawURL}}" type="{{.ContentType}}">
+      Your browser cannot play this audio format. Use Raw or Download.
+    </audio>
+  {{else}}
+    <video controls preload="metadata">
+      <source src="{{.RawURL}}" type="{{.ContentType}}">
+      Your browser cannot play this video format. Use Raw or Download.
+    </video>
+  {{end}}
+</body>
+</html>`))
