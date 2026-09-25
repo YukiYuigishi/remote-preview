@@ -208,7 +208,7 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, rel, remoteP
 	if !isPlainText(remotePath) && !isCSV(remotePath) && !isTSV(remotePath) && !isJSONLines(remotePath) {
 		prefix, err := h.readFilePrefix(r.Context(), remotePath, 1024)
 		if err != nil {
-			h.fileReadError(w, err)
+			h.fileReadError(w, r.Context(), err)
 			return
 		}
 		if !isLikelyText(prefix) {
@@ -219,7 +219,7 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, rel, remoteP
 
 	data, err := h.remote.Read(r.Context(), remotePath)
 	if err != nil {
-		h.fileReadError(w, err)
+		h.fileReadError(w, r.Context(), err)
 		return
 	}
 
@@ -245,8 +245,8 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, rel, remoteP
 	h.serveRawFile(w, r, remotePath)
 }
 
-func (h *handler) fileReadError(w http.ResponseWriter, err error) {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+func (h *handler) fileReadError(w http.ResponseWriter, requestContext context.Context, err error) {
+	if requestContext.Err() != nil {
 		return
 	}
 	http.Error(w, err.Error(), http.StatusBadGateway)
@@ -345,7 +345,7 @@ func (h *handler) serveRawFile(w http.ResponseWriter, r *http.Request, remotePat
 		var err error
 		size, err = source.Size(r.Context(), remotePath)
 		if err != nil {
-			h.fileReadError(w, err)
+			h.fileReadError(w, r.Context(), err)
 			return
 		}
 	} else if r.Method == http.MethodHead {
@@ -356,7 +356,7 @@ func (h *handler) serveRawFile(w http.ResponseWriter, r *http.Request, remotePat
 		var err error
 		buffered, err = h.remote.Read(r.Context(), remotePath)
 		if err != nil {
-			h.fileReadError(w, err)
+			h.fileReadError(w, r.Context(), err)
 			return
 		}
 		size = int64(len(buffered))
@@ -404,7 +404,7 @@ func (h *handler) serveRawFile(w http.ResponseWriter, r *http.Request, remotePat
 		var err error
 		reader, err = source.OpenRange(r.Context(), remotePath, start, length)
 		if err != nil {
-			h.fileReadError(w, err)
+			h.fileReadError(w, r.Context(), err)
 			return
 		}
 	} else {

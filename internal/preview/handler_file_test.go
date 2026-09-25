@@ -106,6 +106,19 @@ func TestHandlerHEADDoesNotReadPreviewFile(t *testing.T) {
 	}
 }
 
+func TestHandlerReportsBackendDeadlineWhileRequestIsActive(t *testing.T) {
+	backend := newFakeRemoteFS()
+	backend.kinds["/root/notes.txt"] = "file"
+	backend.readErr["/root/notes.txt"] = context.DeadlineExceeded
+	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: backend}
+
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/notes.txt", nil))
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("backend deadline response=%d body=%q, want 502", response.Code, response.Body.String())
+	}
+}
+
 func TestHandlerStreamsRawRangesAndKeepsHEADOpenFree(t *testing.T) {
 	base := newFakeRemoteFS()
 	base.kinds["/root/track.mp3"] = "file"
