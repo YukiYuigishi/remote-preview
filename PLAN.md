@@ -15,7 +15,7 @@
 - helper cache miss時のbinary uploadはSSH compressionを使い、失敗時はraw uploadへfallbackする。
 - remote accessはprocess-localなOpenSSH ControlMasterを自動的に使い、helper probe、listing、file read間で同じtransport connectionを再利用する。setup失敗時は通常の独立SSHへfallbackする。
 - text-like fileはbrowser内viewerへ送り、対応source codeは同梱したbrowser-side highlight.jsでsyntax highlightを利用する。assetやrich renderingに失敗した場合はplain text/sourceへfallbackする。
-- HTML fileは通常のfile linkから同一originの`text/html`として直接表示し、listen portが使用中なら後続の空きportへ自動でずらす。
+- HTML fileは通常のfile linkから同一originの`text/html`として直接表示する。Issue 031でJS/CSS/module/fetchのresource requestをraw配信し、file targetのparent rootと初期URLを対応した。listen portが使用中なら後続の空きportへ自動でずらす。
 - Markdown、Mermaid、highlight.jsのbrowser assetはversion固定でbinaryへembedし、localhostから配信する。runtime CDN依存はない。
 - MakefileはIssue 011でbuild、helper生成、test、race、vet、check、cleanを再現する。通常のbuild/checkはtracked helper artifactを再生成せず、更新は明示的な`make generate`で行う。
 - GitHub Actionsはpush/PRで`make check`を実行し、`v*` tagでLinux/Darwinの4 platform release archiveを公開する。
@@ -29,6 +29,7 @@
 - 対象ユーザーは、対象ホストへSSH接続できる本人。現行MVPはread-only用途を維持し、書き込み機能は明示的なopt-inとして追加する。
 - local targetは`.`, `./...`, `../...`, `~`, absolute pathで指定し、bare nameは既存互換のremote host shorthandとして扱う。
 - `host:/absolute/path` は継続サポートする。
+- file targetは親directoryを配信rootとし、対象fileのURLを初期表示する。HTMLの相対resourceも同じroot配下から配信する。
 - `host` だけを指定した場合は、リモートのホームディレクトリを対象にする。
 - `host:~`、`host:~/path`、`host:relative/path`はリモートhome基準で解決する。
 - ブラウザは起動時にデフォルトで開く。自動起動を無効にする場合は`-open=false`を指定する。local listen address (`-addr`) と remote target は別概念として扱う。
@@ -154,8 +155,6 @@ Acceptance criteria:
 - Transfer: individual/ZIP download、write opt-in、local/remote upload、directory drop、path traversal、partial file防止。
 
 ## Candidate implementation issues
-
-- Active: Issue 031 — HTML linked resourceをraw配信し、file targetの初期URLと配信rootを修正する。
 
 実装開始時は、次のissueへ分ける。同じfileを同時に変更しない。
 

@@ -63,6 +63,34 @@ func TestHandlerServesKnownTextFileInBrowser(t *testing.T) {
 	}
 }
 
+func TestHandlerUsesFetchDestinationForLinkedResourcesAndKeepsNavigationViewer(t *testing.T) {
+	base := newFakeRemoteFS()
+	base.kinds["/root/app.mjs"] = "file"
+	base.reads["/root/app.mjs"] = []byte("export const value = 42;")
+	backend := &fakeRangeRemoteFS{fakeRemoteFS: base, content: []byte("export const value = 42;")}
+	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: backend}
+
+	resource := httptest.NewRequest(http.MethodGet, "/app.mjs", nil)
+	resource.Header.Set("Sec-Fetch-Dest", "script")
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, resource)
+	if response.Code != http.StatusOK || response.Body.String() != string(backend.content) || response.Header().Get("Content-Type") != "text/javascript; charset=utf-8" {
+		t.Fatalf("resource response=%d headers=%v body=%q", response.Code, response.Header(), response.Body.String())
+	}
+
+	for _, destination := range []string{"", "document", "iframe", "frame"} {
+		request := httptest.NewRequest(http.MethodGet, "/app.mjs", nil)
+		if destination != "" {
+			request.Header.Set("Sec-Fetch-Dest", destination)
+		}
+		navigation := httptest.NewRecorder()
+		h.ServeHTTP(navigation, request)
+		if navigation.Code != http.StatusOK || navigation.Header().Get("Content-Type") != "text/html; charset=utf-8" || !strings.Contains(navigation.Body.String(), "source-code") {
+			t.Fatalf("destination %q response=%d headers=%v body=%q", destination, navigation.Code, navigation.Header(), navigation.Body.String())
+		}
+	}
+}
+
 func TestHandlerServesMediaViewerBeforeReadingFile(t *testing.T) {
 	for _, test := range []struct {
 		name        string
@@ -206,6 +234,119 @@ func TestLocalHandlerStreamsRawByteRange(t *testing.T) {
 		if response.Code != test.status || response.Body.String() != test.body || response.Header().Get("Content-Length") != test.contentLen || response.Header().Get("Content-Range") != test.contentRng {
 			t.Fatalf("%s Range %q response=%d headers=%v body=%q", test.method, test.rangeValue, response.Code, response.Header(), response.Body.String())
 		}
+	}
+}
+
+func TestLocalHTMLLinkedResourcesAreServedRawOverHTTP(t *testing.T) {
+	root := t.TempDir()
+	assets := filepath.Join(root, "assets")
+	if err := os.MkdirAll(assets, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"index.html":        `<link rel="stylesheet" href="assets/style.css"><script type="module" src="assets/app.mjs"></script><script src="assets/classic.js"></script>`,
+		"assets/style.css":  `@import "./more.css"; body { color: navy }`,
+		"assets/more.css":   `body { margin: 0 }`,
+		"assets/classic.js": `window.classicLoaded = true;`,
+		"assets/app.mjs":    `import { value } from "./dep.mjs"; window.moduleValue = value;`,
+		"assets/dep.mjs":    `export const value = 42;`,
+		"data.json":         `{"ok":true}`,
+		"empty.js":          "",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	local := newCachedRemoteFS(newLocalRemoteFS(), "local")
+	h := &handler{target: remoteTarget{Host: "local", Root: root}, remote: local, transfer: local}
+	server := httptest.NewServer(h)
+	defer server.Close()
+
+	for _, test := range []struct {
+		name        string
+		destination string
+		contentType string
+	}{
+		{name: "index.html", destination: "document", contentType: "text/html; charset=utf-8"},
+		{name: "assets/classic.js", destination: "script", contentType: "text/javascript; charset=utf-8"},
+		{name: "assets/app.mjs", destination: "script", contentType: "text/javascript; charset=utf-8"},
+		{name: "assets/dep.mjs", destination: "script", contentType: "text/javascript; charset=utf-8"},
+		{name: "assets/style.css", destination: "style", contentType: "text/css; charset=utf-8"},
+		{name: "assets/more.css", destination: "style", contentType: "text/css; charset=utf-8"},
+		{name: "data.json", destination: "empty", contentType: "application/json; charset=utf-8"},
+		{name: "empty.js", destination: "script", contentType: "text/javascript; charset=utf-8"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request, err := http.NewRequest(http.MethodGet, server.URL+"/"+test.name, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Sec-Fetch-Dest", test.destination)
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != http.StatusOK || string(body) != files[test.name] || response.Header.Get("Content-Type") != test.contentType {
+				t.Fatalf("response=%d content-type=%q body=%q", response.StatusCode, response.Header.Get("Content-Type"), body)
+			}
+		})
+	}
+
+	request, err := http.NewRequest(http.MethodHead, server.URL+"/data.json?version=1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Sec-Fetch-Dest", "empty")
+	head, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = head.Body.Close()
+	if head.StatusCode != http.StatusOK || head.Header.Get("Content-Length") != strconv.Itoa(len(files["data.json"])) || head.Header.Get("Content-Type") != "application/json; charset=utf-8" {
+		t.Fatalf("HEAD response=%d headers=%v", head.StatusCode, head.Header)
+	}
+
+	request, err = http.NewRequest(http.MethodGet, server.URL+"/data.json?version=1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Sec-Fetch-Dest", "empty")
+	request.Header.Set("Range", "bytes=2-5")
+	partial, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer partial.Body.Close()
+	body, err := io.ReadAll(partial.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if partial.StatusCode != http.StatusPartialContent || string(body) != `ok":` || partial.Header.Get("Content-Range") != "bytes 2-5/"+strconv.Itoa(len(files["data.json"])) {
+		t.Fatalf("Range response=%d headers=%v body=%q", partial.StatusCode, partial.Header, body)
+	}
+
+	request, err = http.NewRequest(http.MethodGet, server.URL+"/assets/classic.js", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Sec-Fetch-Dest", "document")
+	navigation, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer navigation.Body.Close()
+	navigationBody, err := io.ReadAll(navigation.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if navigation.Header.Get("Content-Type") != "text/html; charset=utf-8" || !strings.Contains(string(navigationBody), "source-code") {
+		t.Fatalf("direct source navigation content-type=%q body=%q", navigation.Header.Get("Content-Type"), navigationBody)
 	}
 }
 

@@ -44,6 +44,19 @@
 
 ## Current state / blocker
 
-- 調査済み。serveFileは`.js`/`.css`をrequest用途に関係なくsource viewerへ変換している。
-- CLIはfile path自体をhandler rootとして`/`を開くため、相対resourceが`file/path`へ解決される。
-- 実装予定。README.mdとdocs/の既存変更は作業対象外。
+- 実装済み。`Sec-Fetch-Dest`が`document`/`frame`/`iframe`以外のfile requestを既存のraw streamingへ渡し、空fileを含むscript、style、module、fetch resourceを元bytesで返す。destination headerなしのsource viewerとdocument navigationは維持する。
+- `.js`/`.mjs`/`.cjs`、CSS、JSONのContent-Typeを明示した。Range streamingとHEAD metadataは既存のraw response pathを利用する。
+- 起動時にlocal/remote targetのkindを解決し、directoryは`/`、fileはparentをrootにしてescaped filenameを初期URLにする。remote home-relative file targetにも対応し、missing targetとKind errorを起動時に返す。
+- Focused verification: `go test ./internal/preview -run 'TestHandler(UsesFetchDestination|ServesKnownTextFile)|TestLocalHTMLLinkedResources|TestResolvePreviewTarget'` passed. Tests cover local HTTP HTML-linked classic/module scripts, module imports, CSS imports, fetch JSON, empty files, resource HEAD/Range, source navigation, directory/file targets, special filenames, remote home-relative paths, and target errors.
+- Primary review/integration完了。README.mdとdocs/の既存変更は変更・stage・commitしていない。
+
+## Verification results
+
+- Focused testsと`git diff --check`: passed。
+- `make check`: passed（`go test ./...`、`go test -race ./...`、`go vet ./...`、CLI binary build）。
+- `go build ./...`: passed。
+- local CLIと実HTTP serverでも確認した。修正前はscript/style/empty destinationのJS/CSS/JSONがviewer HTMLになっていた。修正後はclassic JS、CSSとimport先、moduleとimport先、JSONを元bytesと適切なContent-Typeで返す。
+- `index #日本語.html`をfile targetとして起動し、parent rootとescaped初期URLを確認した。document/frame/iframe/headerなしのsource navigation、resource HEADの空bodyとContent-Length、Rangeの206と元bytesも確認した。
+- root boundaryは既存の`cleanRelativeURLPath`とhandlerのroot joinを維持している。parent root外への相対参照は配信対象にしない。Fetch Metadata headerがないclientは既存preview behaviorを維持し、必要なら`?raw=1`を指定する。
+- 実ページの検証制限: 検証先へ接続できず、対象HTMLの確認は未実施。
+- Browser検証制限: browser skillの接続とdocumentation取得は成功したが、actionがbrowser tooling errorで失敗し、CSS適用とJS実行の目視確認はできなかった。HTTPのresource配信は検証済み。
