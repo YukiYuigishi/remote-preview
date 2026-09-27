@@ -155,6 +155,8 @@ Acceptance criteria:
 
 ## Candidate implementation issues
 
+- Active: Issue 031 — HTML linked resourceをraw配信し、file targetの初期URLと配信rootを修正する。
+
 実装開始時は、次のissueへ分ける。同じfileを同時に変更しない。
 
 1. 責務分割とRemoteFS interface
