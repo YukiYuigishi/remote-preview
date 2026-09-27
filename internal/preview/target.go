@@ -1,6 +1,7 @@
 package preview
 
 import (
+	"context"
 	"fmt"
 	"html/template"
 	"net/url"
@@ -68,6 +69,32 @@ func resolveLocalTarget(target remoteTarget) (remoteTarget, error) {
 	target.Host = "local"
 	target.Root = filepath.Clean(absolute)
 	return target, nil
+}
+
+func resolvePreviewTarget(ctx context.Context, target remoteTarget, remote RemoteFS) (remoteTarget, string, error) {
+	kind, err := remote.Kind(ctx, target.Root)
+	if err != nil {
+		return remoteTarget{}, "", fmt.Errorf("resolve target %s:%s: %w", target.Host, target.Root, err)
+	}
+	switch kind {
+	case "dir":
+		return target, "/", nil
+	case "file":
+		var parent, name string
+		if target.Local {
+			parent = filepath.Dir(target.Root)
+			name = filepath.Base(target.Root)
+		} else {
+			parent = path.Dir(target.Root)
+			name = path.Base(target.Root)
+		}
+		target.Root = parent
+		return target, "/" + url.PathEscape(name), nil
+	case "missing":
+		return remoteTarget{}, "", fmt.Errorf("target %s:%s does not exist", target.Host, target.Root)
+	default:
+		return remoteTarget{}, "", fmt.Errorf("target %s:%s is not a file or directory (kind %q)", target.Host, target.Root, kind)
+	}
 }
 
 func (t *remoteTarget) setResolvedHome(home string) {

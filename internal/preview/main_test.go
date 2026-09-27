@@ -2,13 +2,85 @@ package preview
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"net"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+type targetResolutionErrorRemote struct {
+	RemoteFS
+	err error
+}
+
+func (r targetResolutionErrorRemote) Kind(context.Context, string) (string, error) {
+	return "", r.err
+}
+
+func TestResolvePreviewTargetDirectoryAndLocalFile(t *testing.T) {
+	directory := t.TempDir()
+	resolvedDir, initialPath, err := resolvePreviewTarget(context.Background(), remoteTarget{Host: "local", Root: directory, Local: true}, newLocalRemoteFS())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolvedDir.Root != directory || initialPath != "/" {
+		t.Fatalf("directory target=%#v initialPath=%q", resolvedDir, initialPath)
+	}
+
+	name := "index #日本語.html"
+	file := filepath.Join(directory, name)
+	if err := os.WriteFile(file, []byte("<h1>fixture</h1>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	localTarget, err := resolveLocalTarget(remoteTarget{Root: file, Local: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedFile, initialPath, err := resolvePreviewTarget(context.Background(), localTarget, newLocalRemoteFS())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolvedFile.Root != directory || initialPath != "/"+url.PathEscape(name) {
+		t.Fatalf("file target=%#v initialPath=%q, want parent=%q escaped=%q", resolvedFile, initialPath, directory, "/"+url.PathEscape(name))
+	}
+}
+
+func TestResolvePreviewTargetRemoteHomeRelativeFile(t *testing.T) {
+	target, err := parseTarget("remote-host:~/docs/index #日本語.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.setResolvedHome("/home/test")
+	backend := newFakeRemoteFS()
+	backend.kinds[target.Root] = "file"
+
+	resolved, initialPath, err := resolvePreviewTarget(context.Background(), target, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Host != "remote-host" || resolved.Root != "/home/test/docs" || initialPath != "/index%20%23%E6%97%A5%E6%9C%AC%E8%AA%9E.html" {
+		t.Fatalf("resolved target=%#v initialPath=%q", resolved, initialPath)
+	}
+}
+
+func TestResolvePreviewTargetReportsMissingAndKindErrors(t *testing.T) {
+	missing := newFakeRemoteFS()
+	if _, _, err := resolvePreviewTarget(context.Background(), remoteTarget{Host: "remote-host", Root: "/missing"}, missing); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("missing target error=%v", err)
+	}
+
+	wantErr := errors.New("connection unavailable")
+	backend := targetResolutionErrorRemote{err: wantErr}
+	if _, _, err := resolvePreviewTarget(context.Background(), remoteTarget{Host: "remote-host", Root: "/docs"}, backend); !errors.Is(err, wantErr) || !strings.Contains(err.Error(), "resolve target remote-host:/docs") {
+		t.Fatalf("Kind error=%v", err)
+	}
+}
 
 func TestWriteStartupInfoUsesPlainURLOutput(t *testing.T) {
 	var output bytes.Buffer

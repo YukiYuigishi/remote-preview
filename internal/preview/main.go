@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -94,6 +95,12 @@ func Run(args []string, program string) error {
 	}
 
 	remote := newCachedRemoteFS(backend, target.Host)
+	targetCtx, cancelTarget := context.WithTimeout(context.Background(), 30*time.Second)
+	target, initialPath, err := resolvePreviewTarget(targetCtx, target, remote)
+	cancelTarget()
+	if err != nil {
+		return err
+	}
 	h := &handler{target: target, remote: remote, transfer: remote, writeEnabled: *options.write, maxUploadSize: *options.maxUploadSize, uploads: newUploadSessionStore(), verbose: *options.verbose}
 	defer h.uploads.Close()
 	srv := &http.Server{
@@ -108,7 +115,7 @@ func Run(args []string, program string) error {
 	defer listener.Close()
 	srv.Addr = listener.Addr().String()
 
-	previewURL := previewURLFor(listener.Addr())
+	previewURL := previewURLFor(listener.Addr()) + strings.TrimPrefix(initialPath, "/")
 	writeStartupInfo(os.Stdout, target, previewURL)
 
 	if *options.openPage {

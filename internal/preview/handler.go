@@ -183,6 +183,10 @@ func (h *handler) serveDirectory(w http.ResponseWriter, r *http.Request, rel, re
 }
 
 func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, rel, remotePath string) {
+	if isResourceRequest(r) {
+		h.serveRawFile(w, r, remotePath)
+		return
+	}
 	if r.Method == http.MethodHead {
 		if isMedia(remotePath) && r.URL.Query().Get("raw") != "1" {
 			h.serveMedia(w, r, rel, remotePath)
@@ -243,6 +247,22 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, rel, remoteP
 	}
 
 	h.serveRawFile(w, r, remotePath)
+}
+
+// Browser subresources must receive the original file bytes. Requests without
+// Fetch Metadata retain the existing viewer behavior for direct links and
+// non-browser clients.
+func isResourceRequest(r *http.Request) bool {
+	destination := strings.TrimSpace(r.Header.Get("Sec-Fetch-Dest"))
+	if destination == "" {
+		return false
+	}
+	switch destination {
+	case "document", "frame", "iframe":
+		return false
+	default:
+		return true
+	}
 }
 
 func (h *handler) fileReadError(w http.ResponseWriter, requestContext context.Context, err error) {
@@ -753,6 +773,14 @@ func explicitMediaType(p string) string {
 }
 
 func rawContentType(p string) string {
+	switch strings.ToLower(path.Ext(p)) {
+	case ".js", ".mjs", ".cjs":
+		return "text/javascript; charset=utf-8"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".json":
+		return "application/json; charset=utf-8"
+	}
 	if mediaType := explicitMediaType(p); mediaType != "" {
 		return mediaType
 	}
