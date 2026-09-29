@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 type fakeRangeRemoteFS struct {
@@ -510,6 +511,34 @@ func TestHandlerKeepsBinaryFileAsRaw(t *testing.T) {
 	}
 	if string(response.Body.Bytes()) != string(backend.reads["/root/archive.bin"]) {
 		t.Fatalf("binary response was rendered as text: %v", response.Body.Bytes())
+	}
+}
+
+func TestHandlerServesMarkdownWhenPrefixSplitsUTF8(t *testing.T) {
+	content := strings.Repeat("a", 1023) + "界\n# heading\n" + strings.Repeat("b", 16<<10)
+	if !utf8.ValidString(content) || utf8.ValidString(content[:1024]) {
+		t.Fatal("fixture must be valid UTF-8 with an incomplete rune in the sniffed prefix")
+	}
+	backend := newFakeRemoteFS()
+	backend.kinds["/root/notes.md"] = "file"
+	backend.reads["/root/notes.md"] = []byte(content)
+	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: backend}
+
+	request := httptest.NewRequest(http.MethodGet, "/notes.md", nil)
+	request.Header.Set("Sec-Fetch-Dest", "document")
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "text/html; charset=utf-8" || !strings.Contains(response.Body.String(), `<article id="rendered"></article>`) {
+		t.Fatalf("markdown preview response=%d content-type=%q", response.Code, response.Header().Get("Content-Type"))
+	}
+	if disposition := response.Header().Get("Content-Disposition"); disposition != "" {
+		t.Fatalf("markdown preview disposition=%q", disposition)
+	}
+
+	raw := httptest.NewRecorder()
+	h.ServeHTTP(raw, httptest.NewRequest(http.MethodGet, "/notes.md?raw=1", nil))
+	if raw.Code != http.StatusOK || raw.Body.String() != content {
+		t.Fatalf("raw response=%d length=%d", raw.Code, raw.Body.Len())
 	}
 }
 

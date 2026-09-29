@@ -209,7 +209,7 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, rel, remoteP
 		return
 	}
 
-	if !isPlainText(remotePath) && !isCSV(remotePath) && !isTSV(remotePath) && !isJSONLines(remotePath) {
+	if !isMarkdown(remotePath) && !isPlainText(remotePath) && !isCSV(remotePath) && !isTSV(remotePath) && !isJSONLines(remotePath) {
 		prefix, err := h.readFilePrefix(r.Context(), remotePath, 1024)
 		if err != nil {
 			h.fileReadError(w, r.Context(), err)
