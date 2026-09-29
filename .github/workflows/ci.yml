@@ -12,6 +12,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - name: Test Windows client paths and transfer
+        run: go test ./... -run '^TestWindows' -count=1
+
+      - name: Build Windows CLI
+        run: go build ./...
+
   verify:
     runs-on: ubuntu-latest
     strategy:

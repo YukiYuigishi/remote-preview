@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -50,7 +51,7 @@ func resolveLocalTarget(target remoteTarget) (remoteTarget, error) {
 	}
 
 	root := target.Root
-	if root == "~" || strings.HasPrefix(root, "~/") {
+	if root == "~" || strings.HasPrefix(root, "~/") || (runtime.GOOS == "windows" && strings.HasPrefix(root, `~\`)) {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return remoteTarget{}, fmt.Errorf("resolve local home: %w", err)
@@ -111,10 +112,15 @@ func isLocalTarget(s string) bool {
 	if s == "~" || strings.HasPrefix(s, "~/") {
 		return true
 	}
+	if runtime.GOOS == "windows" {
+		if strings.HasPrefix(s, `~\`) || strings.HasPrefix(s, `.\`) || strings.HasPrefix(s, `..\`) || strings.HasPrefix(s, `\`) || filepath.VolumeName(s) != "" {
+			return true
+		}
+	}
 	if filepath.IsAbs(s) {
 		return true
 	}
-	return s == "." || s == ".." || strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../")
+	return s == "." || s == ".." || strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../") || strings.HasPrefix(s, "/")
 }
 
 func cleanRelativeURLPath(p string) string {

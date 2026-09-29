@@ -62,6 +62,18 @@ make install
 
 `GOBIN`を設定している場合は、Go toolchainの設定に従ってそのdirectoryへinstallされます。実際の配置先は`go env GOBIN`または`go env GOPATH`で確認できます。
 
+## Quick start (Windows)
+
+Windows amd64/arm64のrelease ZIPを展開し、PowerShellから実行できます。SSH接続にはWindowsのOpenSSH client (`ssh.exe`) をPATHに用意してください。接続先はPOSIX shell (`sh`) が使えるLinux/macOSなどを想定しています。
+
+```powershell
+.\ykview.exe remote-host:/remote/path
+.\ykview.exe 'C:\Users\me\Documents'
+.\ykview.exe .\work
+```
+
+Goからbuildする場合は、repositoryのrootで `go build -o ykview.exe ./cmd/ykview` を実行します。Windows clientではSSH ControlMasterを使用せず、通常の`ssh.exe`接続を使います。
+
 ブラウザで:
 
 ```text
@@ -146,7 +158,7 @@ make clean      # bin/のMakefile生成物を削除
 
 Pull requestとpushではGitHub Actionsが`make check`を実行します。
 
-`v*` tagをpushすると、Linux/Darwinのamd64/arm64向けCLI archiveと`SHA256SUMS`を含むGitHub Releaseを自動作成します。
+`v*` tagをpushすると、Linux/Darwinのamd64/arm64向けtar.gzとWindowsのamd64/arm64向けZIP、`SHA256SUMS`を含むGitHub Releaseを自動作成します。
 
 ```bash
 git tag v0.1.0
@@ -169,7 +181,7 @@ scripts/package-release.sh v0.1.0 dist
 - `internal/preview/assets`: marked、Mermaid、highlight.js/CSSのversion固定asset
 - `internal/remotehelper`: helperのfilesystem traversalとbatch protocol writer
 - `scripts/generate-remote-helpers.sh`: helper artifactのcross buildと圧縮
-- `scripts/package-release.sh`: Linux/Darwin向けrelease archiveの作成
+- `scripts/package-release.sh`: Linux/Darwin/Windows向けrelease archiveの作成
 - `Makefile`: build、test、verification command
 - `.github/workflows/ci.yml`: pull request / push時のCI
 - `.github/workflows/release.yml`: `v*` tag push時のGitHub Release

@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,7 +57,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rel := cleanRelativeURLPath(r.URL.Path)
-	remotePath := path.Join(h.target.Root, rel)
+	if h.target.Local && runtime.GOOS == "windows" && (strings.Contains(rel, `\`) || (rel != "" && !filepath.IsLocal(filepath.FromSlash(rel)))) {
+		http.NotFound(w, r)
+		return
+	}
+	remotePath := h.transferPath(rel)
 	slog.Debug("http request start", "method", r.Method, "uri", r.URL.RequestURI(), "remote_path", remotePath)
 
 	kind, err := h.remote.Kind(r.Context(), remotePath)
@@ -76,6 +82,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (h *handler) pathBase(filePath string) string {
+	if h.target.Local {
+		return filepath.Base(filePath)
+	}
+	return path.Base(filePath)
 }
 
 func (h *handler) serveDirectory(w http.ResponseWriter, r *http.Request, rel, remotePath string) {
@@ -292,7 +305,7 @@ func (h *handler) serveMedia(w http.ResponseWriter, r *http.Request, rel, remote
 		RawURL      string
 		DownloadURL string
 	}{
-		Name:        path.Base(remotePath),
+		Name:        h.pathBase(remotePath),
 		Host:        h.target.Host,
 		RemotePath:  remotePath,
 		Breadcrumb:  breadcrumbHTML(r.URL.EscapedPath(), false),
@@ -510,7 +523,7 @@ func (h *handler) serveMarkdown(w http.ResponseWriter, r *http.Request, rel, rem
 		RawURL     string
 		SourceJSON template.JS
 	}{
-		Name:       path.Base(remotePath),
+		Name:       h.pathBase(remotePath),
 		Host:       h.target.Host,
 		RemotePath: remotePath,
 		Breadcrumb: breadcrumbHTML(r.URL.EscapedPath(), false),
@@ -550,7 +563,7 @@ func (h *handler) serveTextWithNotice(w http.ResponseWriter, r *http.Request, re
 		LanguageJSON template.JS
 		Notice       string
 	}{
-		Name:         path.Base(remotePath),
+		Name:         h.pathBase(remotePath),
 		Host:         h.target.Host,
 		RemotePath:   remotePath,
 		Breadcrumb:   breadcrumbHTML(r.URL.EscapedPath(), false),
@@ -623,7 +636,7 @@ func (h *handler) serveDelimited(w http.ResponseWriter, r *http.Request, remoteP
 	}
 
 	data := delimitedPreview{
-		Name:       path.Base(remotePath),
+		Name:       h.pathBase(remotePath),
 		Host:       h.target.Host,
 		RemotePath: remotePath,
 		Breadcrumb: breadcrumbHTML(r.URL.EscapedPath(), false),

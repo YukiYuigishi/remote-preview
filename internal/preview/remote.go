@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -91,6 +92,11 @@ const controlPersist = "5m"
 // other callers that only need an independent SSH invocation do not allocate a
 // temporary directory.
 func (s *sshRemoteFS) enableConnectionSharing() {
+	// Windows OpenSSH does not provide the Unix-domain ControlPath socket used
+	// by this transport. Independent ssh processes still honor the user's config.
+	if runtime.GOOS == "windows" {
+		return
+	}
 	s.transportMu.Lock()
 	defer s.transportMu.Unlock()
 	if s.transportClosed || s.controlDir != "" {
