@@ -5,10 +5,12 @@ package preview
 import (
 	"bytes"
 	"context"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -101,5 +103,78 @@ func TestWindowsSSHUsesIndependentConnections(t *testing.T) {
 	args := strings.Join(command.Args, " ")
 	if !strings.Contains(args, "ssh ") || strings.Contains(args, "ControlPath=") || !strings.Contains(args, "remote-host") {
 		t.Fatalf("ssh command=%q", args)
+	}
+}
+
+func TestWindowsServerPowerShellOperations(t *testing.T) {
+	for _, shell := range []string{"cmd.exe", "powershell.exe"} {
+		t.Run(shell, func(t *testing.T) {
+			remote := newSSHRemoteFS("test-host")
+			remote.command = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+				commandLine := args[len(args)-1]
+				if !strings.HasPrefix(commandLine, powerShellCommandPrefix) {
+					t.Errorf("unexpected remote command %q", commandLine)
+				}
+				if shell == "cmd.exe" {
+					return exec.CommandContext(ctx, "cmd.exe", "/c", commandLine)
+				}
+				return exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", commandLine)
+			}
+			if !remote.probeWindows(context.Background()) {
+				t.Fatal("Windows server probe failed")
+			}
+			remote.windows = true
+			home, err := remote.Home(context.Background())
+			if err != nil || !isWindowsDriveAbsolute(home) {
+				t.Fatalf("Windows home=%q, %v", home, err)
+			}
+			root := filepath.ToSlash(t.TempDir())
+			name := "日本語's.bin"
+			file := joinRemotePath(root, name)
+			content := []byte{0, 1, 2, 3, 255, 10}
+			if err := os.WriteFile(filepath.FromSlash(file), content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if kind, err := remote.Kind(context.Background(), file); err != nil || kind != "file" {
+				t.Fatalf("file kind=%q, %v", kind, err)
+			}
+			if size, err := remote.Size(context.Background(), file); err != nil || size != int64(len(content)) {
+				t.Fatalf("file size=%d, %v", size, err)
+			}
+			if got, err := remote.Read(context.Background(), file); err != nil || !bytes.Equal(got, content) {
+				t.Fatalf("file contents=%v, %v", got, err)
+			}
+			stream, err := remote.OpenRange(context.Background(), file, 2, 3)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ranged, readErr := io.ReadAll(stream)
+			closeErr := stream.Close()
+			if readErr != nil || closeErr != nil || !bytes.Equal(ranged, content[2:5]) {
+				t.Fatalf("range=%v, read=%v, close=%v", ranged, readErr, closeErr)
+			}
+			listing, err := remote.ListBatch(context.Background(), root)
+			if err != nil || listing.RootKind != "dir" || len(listing.Listings) == 0 {
+				t.Fatalf("listing=%#v, %v", listing, err)
+			}
+			if err := remote.MkdirAll(context.Background(), joinRemotePath(root, "nested")); err != nil {
+				t.Fatal(err)
+			}
+			destination := joinRemotePath(root, "nested/upload.bin")
+			if err := remote.WriteFile(context.Background(), destination, bytes.NewReader(content)); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(filepath.FromSlash(destination))
+			if err != nil || !bytes.Equal(got, content) {
+				t.Fatalf("uploaded contents=%v, %v", got, err)
+			}
+			if err := remote.WriteFile(context.Background(), destination, bytes.NewReader([]byte("replacement"))); err != nil {
+				t.Fatal(err)
+			}
+			got, err = os.ReadFile(filepath.FromSlash(destination))
+			if err != nil || string(got) != "replacement" {
+				t.Fatalf("replacement=%q, %v", got, err)
+			}
+		})
 	}
 }

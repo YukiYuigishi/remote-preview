@@ -47,7 +47,7 @@ func (h *handler) transferPath(relative string) string {
 	if h.target.Local {
 		return filepath.Join(h.target.Root, filepath.FromSlash(relative))
 	}
-	return path.Join(h.target.Root, relative)
+	return joinRemotePath(h.target.Root, relative)
 }
 
 func (h *handler) validateTransferPath(raw string, allowEmpty bool) (string, error) {
@@ -57,6 +57,9 @@ func (h *handler) validateTransferPath(raw string, allowEmpty bool) (string, err
 	}
 	if h.target.Local && runtime.GOOS == "windows" && relative != "" && !filepath.IsLocal(filepath.FromSlash(relative)) {
 		return "", fmt.Errorf("invalid local path %q", raw)
+	}
+	if h.target.Windows && relative != "" && !isWindowsSafeRelativePath(relative) {
+		return "", fmt.Errorf("invalid Windows server path %q", raw)
 	}
 	return relative, nil
 }

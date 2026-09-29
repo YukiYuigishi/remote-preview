@@ -381,6 +381,9 @@ func TestRemoteHelperCacheNameContainsVersionPlatformAndHash(t *testing.T) {
 }
 
 func TestSSHRemoteFSHelperCacheHitAvoidsUpload(t *testing.T) {
+	if !supportsServerOS("linux") {
+		t.Skip("Linux helper is excluded from this build")
+	}
 	remote := newSSHRemoteFS("remote-host")
 	remote.command = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
 		remoteCommand := args[len(args)-1]
@@ -457,6 +460,13 @@ func TestSSHRemoteFSUsesHelperBatch(t *testing.T) {
 
 func TestSSHRemoteFSHelperAssetsAreEmbedded(t *testing.T) {
 	for _, platform := range []string{"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64"} {
+		serverOS, _, _ := strings.Cut(platform, "/")
+		if !supportsServerOS(serverOS) {
+			if _, err := embeddedRemoteHelper(platform); err == nil {
+				t.Fatalf("platform %s unexpectedly embedded", platform)
+			}
+			continue
+		}
 		binary, err := embeddedRemoteHelper(platform)
 		if err != nil {
 			t.Fatalf("platform %s: %v", platform, err)

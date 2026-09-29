@@ -3,7 +3,6 @@ package preview
 import (
 	"bytes"
 	"compress/gzip"
-	"embed"
 	"fmt"
 	"io"
 	"strings"
@@ -14,12 +13,14 @@ import (
 // the supported POSIX remote targets.
 //
 //go:generate ../../scripts/generate-remote-helpers.sh
-//go:embed remote_helpers/*.gz
-var embeddedRemoteHelperFiles embed.FS
+
+func supportsServerOS(name string) bool {
+	return compiledServerOS == "all" || compiledServerOS == name
+}
 
 func embeddedRemoteHelper(platform string) ([]byte, error) {
 	name := "remote_helpers/" + strings.ReplaceAll(platform, "/", "-") + ".gz"
-	compressed, err := embeddedRemoteHelperFiles.ReadFile(name)
+	compressed, err := readEmbeddedRemoteHelper(name)
 	if err != nil {
 		return nil, fmt.Errorf("remote helper is not embedded for %s: %w", platform, err)
 	}

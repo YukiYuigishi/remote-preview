@@ -26,8 +26,14 @@ jobs:
       - name: Test Windows client paths and transfer
         run: go test ./... -run '^TestWindows' -count=1
 
+      - name: Test Windows server build
+        run: go test -tags server_windows ./... -run '^TestWindows' -count=1
+
       - name: Build Windows CLI
         run: go build ./...
+
+      - name: Build Windows-server-only CLI
+        run: go build -tags server_windows ./...
 
   verify:
     runs-on: ubuntu-latest
@@ -69,6 +75,16 @@ jobs:
 
       - name: Build
         run: go build ./...
+
+      - name: Test server OS selection
+        if: matrix.go-version == '1.23.x'
+        run: |
+          go test -tags server_linux ./...
+          go test -tags server_darwin ./...
+          go test -tags server_windows ./...
+          make build SERVER_OS=linux
+          make build SERVER_OS=darwin
+          make build SERVER_OS=windows
 
       - name: Dead-code analysis
         if: matrix.go-version == '1.26.x'

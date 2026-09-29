@@ -57,7 +57,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rel := cleanRelativeURLPath(r.URL.Path)
-	if h.target.Local && runtime.GOOS == "windows" && (strings.Contains(rel, `\`) || (rel != "" && !filepath.IsLocal(filepath.FromSlash(rel)))) {
+	if rel != "" && ((h.target.Windows && !isWindowsSafeRelativePath(rel)) || (h.target.Local && runtime.GOOS == "windows" && !filepath.IsLocal(filepath.FromSlash(rel)))) {
 		http.NotFound(w, r)
 		return
 	}

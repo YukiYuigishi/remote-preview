@@ -73,6 +73,22 @@ func Run(args []string, program string) error {
 	} else {
 		sshBackend := newSSHRemoteFS(target.Host)
 		sshBackend.enableConnectionSharing()
+		probeCtx, probeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if supportsServerOS("windows") && sshBackend.probeWindows(probeCtx) {
+			sshBackend.windows = true
+			err = target.prepareWindows()
+		} else if compiledServerOS != "all" {
+			var serverOS string
+			serverOS, err = sshBackend.probePOSIXOS(probeCtx)
+			if err == nil && !supportsServerOS(serverOS) {
+				err = fmt.Errorf("server OS %s is not included in this build (SERVER_OS=%s)", serverOS, compiledServerOS)
+			}
+		}
+		probeCancel()
+		if err != nil {
+			_ = sshBackend.Close()
+			return err
+		}
 		backend = sshBackend
 		closer = sshBackend
 	}
@@ -92,6 +108,9 @@ func Run(args []string, program string) error {
 			return fmt.Errorf("resolve remote home: %w", homeErr)
 		}
 		target.setResolvedHome(home)
+		if target.Windows && !isWindowsDriveAbsolute(target.Root) && !isWindowsUNC(target.Root) {
+			return fmt.Errorf("resolved Windows target is not an absolute path: %q", target.Root)
+		}
 	}
 
 	remote := newCachedRemoteFS(backend, target.Host)

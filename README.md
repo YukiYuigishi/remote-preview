@@ -19,6 +19,7 @@ SSH先またはlocal filesystemを、ローカルブラウザから閲覧・down
   などをそのまま利用
 - remote-side Go helper（Linux/darwinのamd64/arm64）でcurrentと直下directoryをbatch listing
 - helperが使えない場合はPOSIX `sh`（macOS / BusyBoxを含む）のbatch listingへfallback
+- Windows SSHサーバーではPowerShellを使い、helper binaryなしで一覧・preview・転送を実行
 - ディレクトリ一覧とbreadcrumb navigation
 - HTML: そのままブラウザでpreview（通常のファイルリンクから直接表示）
 - Markdown: GitHub Flavored Markdown (GFM) preview
@@ -73,6 +74,8 @@ Windows amd64/arm64のrelease ZIPを展開し、PowerShellから実行できま�
 ```
 
 Goからbuildする場合は、repositoryのrootで `go build -o ykview.exe ./cmd/ykview` を実行します。Windows clientではSSH ControlMasterを使用せず、通常の`ssh.exe`接続を使います。
+
+WindowsをSSHサーバーとして使う場合は、サーバー側にOpenSSH ServerとWindows PowerShellが必要です。`remote-host`でユーザーのhomeを、`remote-host:C:/Users/me/Documents`でdrive absolute pathを指定できます。UNC pathは `remote-host:\\server\share\folder` と指定できます。`-write`指定時はWindows側へのuploadにも対応します。Windowsサーバーの初期SSH shellはcmd.exeで、PowerShellへ変更することもできます。どちらの設定でもPowerShellコマンドを起動します。Windowsサーバーでの`host:/path`形式は使えないため、絶対パスにはdriveまたはUNCのserver/shareを含めてください。Windowsサーバー上の一時的なhelper binaryは不要です。[Windows OpenSSH Serverのshell設定](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh-server-configuration)
 
 ブラウザで:
 
@@ -141,6 +144,16 @@ make generate
 ```
 
 通常の`make build`と`make check`は、tracked済みのhelper artifactをそのまま使い、`go generate`を自動実行しません。Go toolchainのversionやbuild環境によってhelper binaryが変わる可能性があるため、artifactの更新が必要なときだけ`make generate`を明示的に実行し、差分を確認してcommitします。
+
+接続先のOSが決まっている場合は、`SERVER_OS`を指定して不要なremote helperをbinaryへ埋め込まずにbuildできます。`all`が既定です。Windowsサーバー向けbuildはLinux/Darwin helperを含みません。
+
+```bash
+make build SERVER_OS=linux
+make build SERVER_OS=darwin
+make build SERVER_OS=windows
+```
+
+GNU Makeがない環境では、`go build -tags server_windows -o ykview.exe ./cmd/ykview` のように同じbuild tagを指定できます。`SERVER_OS`を制限したbinaryは指定OS以外のSSHサーバーを拒否します。local filesystem targetはどの設定でも使えます。
 
 主なdevelopment command:
 
@@ -288,7 +301,7 @@ Remote filesystem
 - HTML/SVGはread-only用途の同一origin上で直接表示するため、信頼できるremote fileだけを開く
 - Markdown / Mermaid / syntax highlightのbrowser assetを同梱するため、binary sizeが増える
 - SSH URI形式やIPv6 literalのtarget parserは未対応
-- Windows remote helperは未対応で、現状はshell fallbackを試みる
+- WindowsサーバーではPowerShell 5.1以降が必要。drive absolute path、UNC path、home-relative pathに対応
 - helper cacheがない場合はplatform判定とbinary uploadが発生するため、高RTTやProxyJump環境では初回表示が遅くなる場合がある。cache hit時はbinary uploadを行わない
 - remote helper cacheのstale entryは自動GCしない
 - process-local ControlMasterは終了時に閉じるため、別の`remote-preview` processとのconnection共有は行わない。ControlMaster setupに失敗した場合は通常の独立SSHへfallbackする

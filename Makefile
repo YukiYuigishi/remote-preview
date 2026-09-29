@@ -1,8 +1,21 @@
 GO ?= go
 BINDIR ?= bin
+SERVER_OS ?= all
 
-APP := $(BINDIR)/ykview
-HELPER := $(BINDIR)/ykview-helper
+ifeq ($(SERVER_OS),all)
+SERVER_TAGS :=
+else ifneq ($(filter $(SERVER_OS),linux darwin windows),)
+SERVER_TAGS := -tags server_$(SERVER_OS)
+else
+$(error SERVER_OS must be all, linux, darwin, or windows)
+endif
+
+ifeq ($(OS),Windows_NT)
+EXE := .exe
+endif
+
+APP := $(BINDIR)/ykview$(EXE)
+HELPER := $(BINDIR)/ykview-helper$(EXE)
 
 .PHONY: all build build-helper install generate test test-race vet check clean
 
@@ -10,14 +23,14 @@ all: build
 
 build:
 	mkdir -p "$(BINDIR)"
-	$(GO) build -trimpath -o "$(APP)" ./cmd/ykview
+	$(GO) build $(SERVER_TAGS) -trimpath -o "$(APP)" ./cmd/ykview
 
 build-helper:
 	mkdir -p "$(BINDIR)"
 	$(GO) build -trimpath -o "$(HELPER)" ./cmd/ykview-helper
 
 install:
-	$(GO) install -trimpath ./cmd/ykview
+	$(GO) install $(SERVER_TAGS) -trimpath ./cmd/ykview
 
 generate:
 	GO="$(GO)" $(GO) generate ./internal/preview
@@ -36,7 +49,7 @@ check:
 	$(GO) test -race ./...
 	$(GO) vet ./...
 	mkdir -p "$(BINDIR)"
-	$(GO) build -trimpath -o "$(APP)" ./cmd/ykview
+	$(GO) build $(SERVER_TAGS) -trimpath -o "$(APP)" ./cmd/ykview
 
 clean:
 	rm -f "$(APP)" "$(HELPER)"
