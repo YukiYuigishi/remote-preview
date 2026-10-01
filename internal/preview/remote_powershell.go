@@ -134,12 +134,17 @@ $parent=[IO.Path]::GetDirectoryName($p)
 if(![IO.Directory]::Exists($parent)){throw 'upload parent does not exist'}
 if([IO.Directory]::Exists($p)){throw 'upload destination is a directory'}
 $temp=[IO.Path]::Combine($parent,'.ykview-upload-'+$nonce)
+$backup=[IO.Path]::Combine($parent,'.ykview-backup-'+$nonce)
 try {
+  if([IO.File]::Exists($backup)){throw 'upload backup path already exists'}
   $file=[IO.File]::Open($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
   try {[Console]::OpenStandardInput().CopyTo($file)} finally {$file.Dispose()}
   Check-WritePath $p
-  if([IO.File]::Exists($p)){[IO.File]::Replace($temp,$p,$null)}else{[IO.File]::Move($temp,$p)}
-} finally {if([IO.File]::Exists($temp)){[IO.File]::Delete($temp)}}`
+  if([IO.File]::Exists($p)){[IO.File]::Replace($temp,$p,$backup)}else{[IO.File]::Move($temp,$p)}
+} finally {
+  if([IO.File]::Exists($temp)){[IO.File]::Delete($temp)}
+  if([IO.File]::Exists($backup)){[IO.File]::Delete($backup)}
+}`
 	_, err := s.runNamedReader(ctx, "upload", remotePath, src, false, "@powershell", windowsScript(body))
 	return err
 }

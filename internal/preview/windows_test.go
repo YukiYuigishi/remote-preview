@@ -180,6 +180,12 @@ func TestWindowsServerPowerShellOperations(t *testing.T) {
 			if err != nil || string(got) != "replacement" {
 				t.Fatalf("replacement=%q, %v", got, err)
 			}
+			for _, pattern := range []string{".ykview-upload-*", ".ykview-backup-*"} {
+				leftovers, err := filepath.Glob(filepath.Join(filepath.FromSlash(root), "nested", pattern))
+				if err != nil || len(leftovers) != 0 {
+					t.Fatalf("upload leftovers for %q: %v, %v", pattern, leftovers, err)
+				}
+			}
 		})
 	}
 }

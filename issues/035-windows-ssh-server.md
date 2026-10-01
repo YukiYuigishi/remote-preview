@@ -33,7 +33,7 @@ ykviewからWindowsのOpenSSHサーバー上のファイルを閲覧・転送で
 
 ## Current state
 
-実装済み。CI run 36691247430ではLinux Go 1.23 jobは成功したが、Windows nativeのPowerShell実行テストとGo 1.26 staticcheckが失敗した。Windows upload path検証を修正し、`MkdirAll` errorの伝播とerror文言を修正した。Windows CI再検証が必要。
+実装済み。CI run 36691247430のGo 1.26 staticcheck失敗とWindows upload path検証失敗を修正した。続くCI run 36878108791ではLinux両jobが成功し、Windows jobは既存ファイルの置き換えで`File.Replace`がbackup pathの形式エラーを返した。PowerShellの文字列引数への`$null`変換が原因と推定し、同じdirectory内の一時backupを使うよう修正した。Windows CI再検証が必要。
 
 ## Verification results
 
@@ -42,3 +42,5 @@ ykviewからWindowsのOpenSSHサーバー上のファイルを閲覧・転送で
 - Windows amd64のtest binaryをcross compileし、Windows amd64/arm64 build: 成功
 - 手元のmacOS buildでは、既定19,395,554 bytesに対し`SERVER_OS=windows`は16,390,322 bytes
 - CI失敗後の修正では`go test ./...`, `go test -race ./...`, `go vet ./...`, `go build ./...`, `go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 -tests=false ./...`: 成功
+- CI run 36878108791: Linux Go 1.23/1.26 job成功。Windows jobは既存ファイルへの再uploadで失敗。
+- 一時backupへの修正後、`go test ./...`、staticcheck、Windows amd64 test binaryのcross compile: 成功。Windows runtimeでの再検証待ち。
