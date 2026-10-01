@@ -102,8 +102,11 @@ try {
 
 const windowsWritePathCheck = `
 function Check-WritePath([string]$target) {
+  if($target -notmatch '^(?:[A-Za-z]:[\/]|[\/]{2}[^\/]+[\/][^\/]+)') { throw 'upload path must be absolute' }
+  foreach($part in $target.Split([char[]]@('\','/'),[StringSplitOptions]::RemoveEmptyEntries)) {
+    if($part -eq '.' -or $part -eq '..') { throw 'upload path must be normalized' }
+  }
   $full=[IO.Path]::GetFullPath($target)
-  if($full -ne $target.Replace('/','\')) { throw 'upload path must be absolute and normalized' }
   $root=[IO.Path]::GetPathRoot($full)
   if(!$root) { throw 'upload path must be absolute' }
   $current=$root
@@ -193,5 +196,5 @@ func (s *sshRemoteFS) windowsList(ctx context.Context, remotePath string) ([]rem
 			return listing.Entries, nil
 		}
 	}
-	return nil, fmt.Errorf("Windows directory listing missing %q", remotePath)
+	return nil, fmt.Errorf("windows directory listing missing %q", remotePath)
 }

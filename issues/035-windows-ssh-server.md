@@ -33,7 +33,7 @@ ykviewからWindowsのOpenSSHサーバー上のファイルを閲覧・転送で
 
 ## Current state
 
-実装済み。Windows nativeのPowerShell実行テストはCI jobに追加した。手元にWindows runtimeがないため、CI実行結果は未確認。
+実装済み。CI run 36691247430ではLinux Go 1.23 jobは成功したが、Windows nativeのPowerShell実行テストとGo 1.26 staticcheckが失敗した。Windows upload path検証を修正し、`MkdirAll` errorの伝播とerror文言を修正した。Windows CI再検証が必要。
 
 ## Verification results
 
@@ -41,3 +41,4 @@ ykviewからWindowsのOpenSSHサーバー上のファイルを閲覧・転送で
 - `server_linux`、`server_darwin`、`server_windows`の各tagでtestsとbuild: 成功
 - Windows amd64のtest binaryをcross compileし、Windows amd64/arm64 build: 成功
 - 手元のmacOS buildでは、既定19,395,554 bytesに対し`SERVER_OS=windows`は16,390,322 bytes
+- CI失敗後の修正では`go test ./...`, `go test -race ./...`, `go vet ./...`, `go build ./...`, `go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 -tests=false ./...`: 成功

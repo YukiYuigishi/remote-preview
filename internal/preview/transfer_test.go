@@ -19,7 +19,8 @@ import (
 )
 
 type fakeTransferFS struct {
-	files map[string][]byte
+	files    map[string][]byte
+	mkdirErr error
 }
 
 func (f *fakeTransferFS) Open(_ context.Context, remotePath string) (io.ReadCloser, transferInfo, error) {
@@ -30,7 +31,7 @@ func (f *fakeTransferFS) Open(_ context.Context, remotePath string) (io.ReadClos
 	return io.NopCloser(bytes.NewReader(content)), transferInfo{Kind: "file", Size: int64(len(content))}, nil
 }
 
-func (f *fakeTransferFS) MkdirAll(context.Context, string) error { return nil }
+func (f *fakeTransferFS) MkdirAll(context.Context, string) error { return f.mkdirErr }
 
 func (f *fakeTransferFS) WriteFile(_ context.Context, remotePath string, src io.Reader) error {
 	content, err := io.ReadAll(src)
@@ -237,6 +238,36 @@ func TestHandlerUploadsMultipartFileToLocalTarget(t *testing.T) {
 	}
 	if string(content) != "uploaded" {
 		t.Fatalf("uploaded content=%q", content)
+	}
+}
+
+func TestHandlerReportsUploadDirectoryCreationError(t *testing.T) {
+	remote := newFakeRemoteFS()
+	remote.kinds["/root"] = "dir"
+	transfer := &fakeTransferFS{files: map[string][]byte{}, mkdirErr: errors.New("cannot create directory")}
+	h := &handler{target: remoteTarget{Host: "remote-host", Root: "/root"}, remote: remote, transfer: transfer, writeEnabled: true}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("files", "upload.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("payload")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/_ykview/transfer/upload", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "cannot create directory") {
+		t.Fatalf("upload status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(transfer.files) != 0 {
+		t.Fatalf("upload wrote files after directory creation failed: %#v", transfer.files)
 	}
 }
 

@@ -160,6 +160,11 @@ func TestWindowsServerPowerShellOperations(t *testing.T) {
 			if err := remote.MkdirAll(context.Background(), joinRemotePath(root, "nested")); err != nil {
 				t.Fatal(err)
 			}
+			for _, unsafePath := range []string{"relative-path", root + "/../outside"} {
+				if err := remote.MkdirAll(context.Background(), unsafePath); err == nil {
+					t.Fatalf("unsafe upload path %q was accepted", unsafePath)
+				}
+			}
 			destination := joinRemotePath(root, "nested/upload.bin")
 			if err := remote.WriteFile(context.Background(), destination, bytes.NewReader(content)); err != nil {
 				t.Fatal(err)

@@ -376,7 +376,8 @@ func (h *handler) serveUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		targetPath := h.transferPath(targetRelative)
-		if err := backend.MkdirAll(r.Context(), h.transferPath(path.Dir(targetRelative))); err == nil {
+		err = backend.MkdirAll(r.Context(), h.transferPath(path.Dir(targetRelative)))
+		if err == nil {
 			err = backend.WriteFile(r.Context(), targetPath, file)
 		}
 		closeErr := file.Close()

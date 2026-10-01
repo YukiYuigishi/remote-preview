@@ -165,15 +165,15 @@ func (t *remoteTarget) prepareWindows() error {
 		t.Home = false
 		t.Root = cleanRemotePath(t.Root)
 		if wasUNC && !isWindowsUNC(t.Root) {
-			return fmt.Errorf("Windows UNC target must include a server and share")
+			return fmt.Errorf("windows UNC target must include a server and share")
 		}
 		return nil
 	}
 	if strings.HasPrefix(t.Root, "/") {
-		return fmt.Errorf("Windows server targets require a drive path such as host:C:/path")
+		return fmt.Errorf("windows server targets require a drive path such as host:C:/path")
 	}
 	if strings.Contains(t.Root, ":") {
-		return fmt.Errorf("Windows server targets require an absolute drive path such as host:C:/path")
+		return fmt.Errorf("windows server targets require an absolute drive path such as host:C:/path")
 	}
 	return nil
 }
