@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -46,7 +47,29 @@ func (h *handler) transferPath(relative string) string {
 	if h.target.Local {
 		return filepath.Join(h.target.Root, filepath.FromSlash(relative))
 	}
-	return path.Join(h.target.Root, relative)
+	return joinRemotePath(h.target.Root, relative)
+}
+
+func (h *handler) validateTransferPath(raw string, allowEmpty bool) (string, error) {
+	relative, err := validateTransferRelativePath(raw, allowEmpty)
+	if err != nil {
+		return "", err
+	}
+	if h.target.Local && runtime.GOOS == "windows" && relative != "" && !filepath.IsLocal(filepath.FromSlash(relative)) {
+		return "", fmt.Errorf("invalid local path %q", raw)
+	}
+	if h.target.Windows && relative != "" && !isWindowsSafeRelativePath(relative) {
+		return "", fmt.Errorf("invalid Windows server path %q", raw)
+	}
+	return relative, nil
+}
+
+func (h *handler) joinTransferPath(directory, name string) (string, error) {
+	relative, err := joinTransferRelativePath(directory, name)
+	if err != nil {
+		return "", err
+	}
+	return h.validateTransferPath(relative, false)
 }
 
 func (h *handler) serveDownload(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +82,7 @@ func (h *handler) serveDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "download path is required", http.StatusBadRequest)
 		return
 	}
-	relative, err := validateTransferRelativePath(raw[0], true)
+	relative, err := h.validateTransferPath(raw[0], true)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -93,7 +116,7 @@ func (h *handler) serveZIPDownload(w http.ResponseWriter, r *http.Request) {
 	paths := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
-		relative, err := validateTransferRelativePath(value, true)
+		relative, err := h.validateTransferPath(value, true)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -258,7 +281,7 @@ func (h *handler) collectArchiveNode(ctx context.Context, relative string, depth
 			return err
 		}
 		for _, child := range children {
-			childRelative, err := joinTransferRelativePath(relative, child.Name)
+			childRelative, err := h.joinTransferPath(relative, child.Name)
 			if err != nil {
 				return err
 			}
@@ -289,7 +312,7 @@ func (h *handler) serveUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "transfer backend is unavailable", http.StatusNotImplemented)
 		return
 	}
-	directory, err := validateTransferRelativePath(r.URL.Query().Get("directory"), true)
+	directory, err := h.validateTransferPath(r.URL.Query().Get("directory"), true)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -331,12 +354,12 @@ func (h *handler) serveUpload(w http.ResponseWriter, r *http.Request) {
 		if index < len(paths) && paths[index] != "" {
 			relative = paths[index]
 		}
-		fileRelative, err := validateTransferRelativePath(relative, false)
+		fileRelative, err := h.validateTransferPath(relative, false)
 		if err != nil {
 			writeTransferJSON(w, http.StatusBadRequest, uploaded, err)
 			return
 		}
-		targetRelative, err := joinTransferRelativePath(directory, fileRelative)
+		targetRelative, err := h.joinTransferPath(directory, fileRelative)
 		if err != nil {
 			writeTransferJSON(w, http.StatusBadRequest, uploaded, err)
 			return
@@ -353,7 +376,8 @@ func (h *handler) serveUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		targetPath := h.transferPath(targetRelative)
-		if err := backend.MkdirAll(r.Context(), h.transferPath(path.Dir(targetRelative))); err == nil {
+		err = backend.MkdirAll(r.Context(), h.transferPath(path.Dir(targetRelative)))
+		if err == nil {
 			err = backend.WriteFile(r.Context(), targetPath, file)
 		}
 		closeErr := file.Close()
@@ -401,12 +425,12 @@ func (h *handler) serveUploadChunk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := r.URL.Query()
-	directory, err := validateTransferRelativePath(query.Get("directory"), true)
+	directory, err := h.validateTransferPath(query.Get("directory"), true)
 	if err != nil {
 		writeUploadChunkJSON(w, http.StatusBadRequest, "", 0, false, nil, err)
 		return
 	}
-	relative, err := validateTransferRelativePath(query.Get("path"), false)
+	relative, err := h.validateTransferPath(query.Get("path"), false)
 	if err != nil {
 		writeUploadChunkJSON(w, http.StatusBadRequest, "", 0, false, nil, err)
 		return
@@ -447,7 +471,7 @@ func (h *handler) serveUploadChunk(w http.ResponseWriter, r *http.Request) {
 		writeUploadChunkJSON(w, http.StatusConflict, "", offset, false, nil, fmt.Errorf("upload destination is not a directory"))
 		return
 	}
-	targetRelative, err := joinTransferRelativePath(directory, relative)
+	targetRelative, err := h.joinTransferPath(directory, relative)
 	if err != nil {
 		writeUploadChunkJSON(w, http.StatusBadRequest, "", offset, false, nil, err)
 		return

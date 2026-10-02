@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,6 +68,7 @@ type sshRemoteFS struct {
 	helperPlatform  string
 	helperErr       error
 	helperDisabled  bool
+	windows         bool
 }
 
 type sshCommandFactory func(context.Context, string, ...string) *exec.Cmd
@@ -91,6 +93,11 @@ const controlPersist = "5m"
 // other callers that only need an independent SSH invocation do not allocate a
 // temporary directory.
 func (s *sshRemoteFS) enableConnectionSharing() {
+	// Windows OpenSSH does not provide the Unix-domain ControlPath socket used
+	// by this transport. Independent ssh processes still honor the user's config.
+	if runtime.GOOS == "windows" {
+		return
+	}
 	s.transportMu.Lock()
 	defer s.transportMu.Unlock()
 	if s.transportClosed || s.controlDir != "" {
@@ -152,6 +159,9 @@ func (s *sshRemoteFS) enableConnectionSharing() {
 }
 
 func (s *sshRemoteFS) Home(ctx context.Context) (string, error) {
+	if s.windows {
+		return s.windowsHome(ctx)
+	}
 	script := `printf '%s' "$HOME"`
 	out, err := s.runNamed(ctx, "home", "", "sh", "-c", script, "sh")
 	if err != nil {
@@ -164,7 +174,25 @@ func (s *sshRemoteFS) Home(ctx context.Context) (string, error) {
 	return path.Clean(home), nil
 }
 
+func (s *sshRemoteFS) probePOSIXOS(ctx context.Context) (string, error) {
+	out, err := s.runNamed(ctx, "os_probe", "", "sh", "-c", "uname -s")
+	if err != nil {
+		return "", fmt.Errorf("probe server OS: %w", err)
+	}
+	switch strings.TrimSpace(string(out)) {
+	case "Linux":
+		return "linux", nil
+	case "Darwin":
+		return "darwin", nil
+	default:
+		return "", fmt.Errorf("unsupported server OS %q", strings.TrimSpace(string(out)))
+	}
+}
+
 func (s *sshRemoteFS) Kind(ctx context.Context, remotePath string) (string, error) {
+	if s.windows {
+		return s.windowsKind(ctx, remotePath)
+	}
 	script := `p=$1; if [ -d "$p" ]; then printf dir; elif [ -f "$p" ]; then printf file; else printf missing; fi`
 	out, err := s.runNamed(ctx, "kind", remotePath, "sh", "-c", script, "sh", remotePath)
 	if err != nil {
@@ -174,11 +202,17 @@ func (s *sshRemoteFS) Kind(ctx context.Context, remotePath string) (string, erro
 }
 
 func (s *sshRemoteFS) Read(ctx context.Context, remotePath string) ([]byte, error) {
+	if s.windows {
+		return s.windowsRead(ctx, remotePath)
+	}
 	script := `p=$1; exec cat -- "$p"`
 	return s.runNamed(ctx, "read", remotePath, "sh", "-c", script, "sh", remotePath)
 }
 
 func (s *sshRemoteFS) Size(ctx context.Context, remotePath string) (int64, error) {
+	if s.windows {
+		return s.windowsSize(ctx, remotePath)
+	}
 	script := `p=$1
 if size=$(stat -c %s "$p" 2>/dev/null); then
   printf '%s' "$size"
@@ -216,6 +250,9 @@ else
 fi`
 
 func (s *sshRemoteFS) OpenRange(ctx context.Context, remotePath string, offset, length int64) (io.ReadCloser, error) {
+	if s.windows {
+		return s.windowsOpenRange(ctx, remotePath, offset, length)
+	}
 	if offset < 0 || length < -1 {
 		return nil, fmt.Errorf("invalid file range")
 	}
@@ -231,6 +268,9 @@ func (s *sshRemoteFS) Open(ctx context.Context, remotePath string) (io.ReadClose
 }
 
 func (s *sshRemoteFS) MkdirAll(ctx context.Context, remotePath string) error {
+	if s.windows {
+		return s.windowsMkdirAll(ctx, remotePath)
+	}
 	_, err := s.runNamed(ctx, "mkdir", remotePath, "sh", "-c", remoteTransferMkdirScript, "sh", remotePath)
 	return err
 }
@@ -241,11 +281,17 @@ func (s *sshRemoteFS) WriteFile(ctx context.Context, remotePath string, src io.R
 		return fmt.Errorf("generate upload name: %w", err)
 	}
 	nonce := hex.EncodeToString(nonceBytes)
+	if s.windows {
+		return s.windowsWriteFile(ctx, remotePath, src, nonce)
+	}
 	_, err := s.runNamedReader(ctx, "upload", remotePath, src, false, "sh", "-c", remoteTransferUploadScript, "sh", remotePath, nonce)
 	return err
 }
 
 func (s *sshRemoteFS) List(ctx context.Context, remotePath string) ([]remoteEntry, error) {
+	if s.windows {
+		return s.windowsList(ctx, remotePath)
+	}
 	// This is the single-directory fallback for batch listing failures. Its
 	// line-oriented output keeps the fallback simple; the normal SSH path uses
 	// ListBatch's NUL-delimited protocol.
@@ -341,6 +387,9 @@ done
 `
 
 func (s *sshRemoteFS) ListBatch(ctx context.Context, remotePath string) (batchListingResult, error) {
+	if s.windows {
+		return s.windowsListBatch(ctx, remotePath)
+	}
 	helperPath, err := s.ensureHelper(ctx)
 	if err == nil {
 		result, helperErr := s.listBatchWithHelper(ctx, helperPath, remotePath)
@@ -486,6 +535,10 @@ func remoteHelperCacheCandidates() ([]remoteHelperCacheCandidate, error) {
 	platforms := []string{"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64"}
 	candidates := make([]remoteHelperCacheCandidate, 0, len(platforms))
 	for _, platform := range platforms {
+		serverOS, _, _ := strings.Cut(platform, "/")
+		if !supportsServerOS(serverOS) {
+			continue
+		}
 		binary, err := embeddedRemoteHelper(platform)
 		if err != nil {
 			return nil, err
@@ -587,8 +640,15 @@ func (s *sshRemoteFS) probeHelper(ctx context.Context) (remoteHelperProbeResult,
 		return remoteHelperProbeResult{}, err
 	}
 	args := []string{"sh", "-c", remoteHelperProbeScript, "sh"}
-	for _, candidate := range candidates {
-		args = append(args, candidate.name)
+	for _, platform := range []string{"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64"} {
+		name := ""
+		for _, candidate := range candidates {
+			if candidate.platform == platform {
+				name = candidate.name
+				break
+			}
+		}
+		args = append(args, name)
 	}
 	out, err := s.runNamed(ctx, "helper_probe", "", args...)
 	if err != nil {
@@ -713,7 +773,7 @@ func parseBatchListings(root string, output []byte) (batchListingResult, error) 
 				i++
 				sortRemoteEntries(entries)
 				listings = append(listings, remoteListing{
-					Path:    path.Clean(path.Join(root, relativePath)),
+					Path:    joinRemotePath(root, relativePath),
 					Entries: entries,
 				})
 				goto nextListing
@@ -845,7 +905,11 @@ func (s *sshRemoteFS) newSSHCommandWithTimeout(ctx context.Context, compression 
 			"-o", "ControlPath="+controlPath,
 		)
 	}
-	sshArgs = append(sshArgs, s.host, shellJoin(args...))
+	remoteCommand := shellJoin(args...)
+	if len(args) == 2 && args[0] == "@powershell" {
+		remoteCommand = encodedPowerShellCommand(args[1])
+	}
+	sshArgs = append(sshArgs, s.host, remoteCommand)
 	command := s.command
 	if command == nil {
 		command = exec.CommandContext

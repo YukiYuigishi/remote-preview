@@ -36,4 +36,4 @@
 - 完了。`resolveTarget`、`remoteHelperPlatform`、`(*sshRemoteFS).run`と、それらだけに依存するtestを削除した。
 - home-relative targetの解決testは`setResolvedHome`を直接検証し、SSH cancellation testは実運用の`runNamed`境界を検証するよう整理した。
 - `.github/workflows/ci.yml`を追加し、GitHub Actionsのubuntu runnerでGo 1.23/1.26のtest、race、vet、buildを実行する。deadcodeとstaticcheckはGo 1.26 jobで実行する。
-- Go 1.23での`go test ./...`、`go vet ./...`、`go build ./...`、Go 1.26での`go run golang.org/x/tools/cmd/deadcode@v0.50.0 ./...`、`go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 -tests=false ./...`、`actionlint`は成功した。静的解析toolはGo 1.26を必要とするため固定versionにした。localのrace testはgcc未導入のため実行不可だが、Actionsは`CGO_ENABLED=1`のubuntu runnerで実行する。
+- Go 1.23での`go test ./...`、`go vet ./...`、`go build ./...`、Go 1.26での`go run golang.org/x/tools/cmd/deadcode@v0.50.0 ./...`、`go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 -tests=false ./...`、`actionlint`は成功した。静的解析toolはGo 1.26を必要とするため固定versionにした。localのrace testは未実施だが、Actionsは`CGO_ENABLED=1`のubuntu runnerで実行する。

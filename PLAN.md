@@ -23,6 +23,8 @@
 - SVGのdirect previewはIssue 028で実装済み。通常のファイルリンクから`image/svg+xml`として表示する。
 - CSV / TSVのtable previewとJSON Lines表示はIssue 029で実装済み。
 - audio/video previewとlocal/remoteのsingle byte-range streamingはIssue 030で実装済み。raw endpointはHEADのfile openを避け、remote Rangeはoffsetをremote側でskipする。
+- Windows client向けlocal path処理とsystem SSH起動、amd64/arm64 release ZIPをIssue 034で追加した。Windows上の動作検証はCIで行う。
+- Issue 035でWindows SSHサーバー向けPowerShell backendと、接続先OSを限定してhelper埋め込み量を減らす`SERVER_OS` build設定を追加する。
 
 ## Product decisions
 

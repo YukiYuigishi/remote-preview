@@ -72,7 +72,7 @@ func newListingCache(host string, options listingCacheOptions) *listingCache {
 }
 
 func (c *listingCache) key(remotePath string) string {
-	return c.host + "\x00" + path.Clean(remotePath)
+	return c.host + "\x00" + cleanRemotePath(remotePath)
 }
 
 func (c *listingCache) get(ctx context.Context, remotePath string, fetch func(context.Context) ([]remoteEntry, error)) ([]remoteEntry, error) {
@@ -83,17 +83,17 @@ func (c *listingCache) get(ctx context.Context, remotePath string, fetch func(co
 		if c.ttl > 0 && c.now().Before(entry.expiresAt) {
 			entries := cloneRemoteEntries(entry.entries)
 			c.mu.Unlock()
-			slog.Debug("listing cache hit", "host", c.host, "path", path.Clean(remotePath), "entries", len(entries))
+			slog.Debug("listing cache hit", "host", c.host, "path", cleanRemotePath(remotePath), "entries", len(entries))
 			return entries, nil
 		}
 		delete(c.entries, key)
 	}
 	if load, ok := c.loading[key]; ok {
 		c.mu.Unlock()
-		slog.Debug("listing cache wait", "host", c.host, "path", path.Clean(remotePath))
+		slog.Debug("listing cache wait", "host", c.host, "path", cleanRemotePath(remotePath))
 		select {
 		case <-load.done:
-			slog.Debug("listing cache wait done", "host", c.host, "path", path.Clean(remotePath), "entries", len(load.entries), "error", load.err)
+			slog.Debug("listing cache wait done", "host", c.host, "path", cleanRemotePath(remotePath), "entries", len(load.entries), "error", load.err)
 			return cloneRemoteEntries(load.entries), load.err
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -105,7 +105,7 @@ func (c *listingCache) get(ctx context.Context, remotePath string, fetch func(co
 	c.mu.Unlock()
 
 	started := time.Now()
-	slog.Debug("listing cache miss", "host", c.host, "path", path.Clean(remotePath))
+	slog.Debug("listing cache miss", "host", c.host, "path", cleanRemotePath(remotePath))
 	entries, err := fetch(ctx)
 	entries = cloneRemoteEntries(entries)
 
@@ -124,7 +124,7 @@ func (c *listingCache) get(ctx context.Context, remotePath string, fetch func(co
 	}
 	close(load.done)
 	c.mu.Unlock()
-	slog.Debug("listing cache fetch done", "host", c.host, "path", path.Clean(remotePath), "entries", len(entries), "duration", time.Since(started), "error", err)
+	slog.Debug("listing cache fetch done", "host", c.host, "path", cleanRemotePath(remotePath), "entries", len(entries), "duration", time.Since(started), "error", err)
 
 	return entries, err
 }
@@ -142,7 +142,7 @@ func (c *listingCache) store(remotePath string, entries []remoteEntry) {
 		sequence:  c.sequence,
 	}
 	c.evictIfNeeded()
-	slog.Debug("listing cache store", "host", c.host, "path", path.Clean(remotePath), "entries", len(entries))
+	slog.Debug("listing cache store", "host", c.host, "path", cleanRemotePath(remotePath), "entries", len(entries))
 }
 
 func (c *listingCache) peek(remotePath string) ([]remoteEntry, bool) {
@@ -201,8 +201,8 @@ func (c *cachedRemoteFS) Home(ctx context.Context) (string, error) {
 }
 
 func (c *cachedRemoteFS) Kind(ctx context.Context, remotePath string) (string, error) {
-	remotePath = path.Clean(remotePath)
-	parent := path.Dir(remotePath)
+	remotePath = cleanRemotePath(remotePath)
+	parent := dirRemotePath(remotePath)
 	base := path.Base(remotePath)
 	if entries, ok := c.cache.peek(parent); ok {
 		for _, entry := range entries {
@@ -225,7 +225,7 @@ func (c *cachedRemoteFS) Kind(ctx context.Context, remotePath string) (string, e
 }
 
 func (c *cachedRemoteFS) List(ctx context.Context, remotePath string) ([]remoteEntry, error) {
-	remotePath = path.Clean(remotePath)
+	remotePath = cleanRemotePath(remotePath)
 	return c.cache.get(ctx, remotePath, func(fetchCtx context.Context) ([]remoteEntry, error) {
 		if batch, ok := c.backend.(batchRemoteFS); ok {
 			result, err := batch.ListBatch(fetchCtx, remotePath)
@@ -248,9 +248,9 @@ func (c *cachedRemoteFS) storeBatch(remotePath string, result batchListingResult
 	var current []remoteEntry
 	foundCurrent := false
 	for _, listing := range result.Listings {
-		listingPath := path.Clean(listing.Path)
+		listingPath := cleanRemotePath(listing.Path)
 		c.cache.store(listingPath, listing.Entries)
-		if listingPath == path.Clean(remotePath) {
+		if listingPath == cleanRemotePath(remotePath) {
 			current = cloneRemoteEntries(listing.Entries)
 			foundCurrent = true
 		}

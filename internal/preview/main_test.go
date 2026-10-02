@@ -218,6 +218,69 @@ func TestResolveLocalTargetMakesAbsolutePath(t *testing.T) {
 	}
 }
 
+func TestWindowsServerTargetPaths(t *testing.T) {
+	for input, want := range map[string]string{
+		"host:C:/data":               "C:/data",
+		`host:C:\data`:               "C:/data",
+		"host:C:/data/..":            "C:/",
+		`host:\\server\share\folder`: "//server/share/folder",
+		"host://server/share/folder": "//server/share/folder",
+	} {
+		target, err := parseTarget(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := target.prepareWindows(); err != nil || target.Root != want || target.Home || !target.Windows {
+			t.Fatalf("prepareWindows(%q)=%#v, %v", input, target, err)
+		}
+	}
+	target, err := parseTarget("host:~/notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := target.prepareWindows(); err != nil {
+		t.Fatal(err)
+	}
+	target.setResolvedHome("C:/Users/person")
+	if target.Root != "C:/Users/person/notes" {
+		t.Fatalf("home-relative Windows path=%q", target.Root)
+	}
+	for _, input := range []string{"host:/data", "host:C:relative"} {
+		target, err := parseTarget(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := target.prepareWindows(); err == nil {
+			t.Fatalf("prepareWindows(%q) unexpectedly succeeded", input)
+		}
+	}
+	if got := dirRemotePath("C:/note.txt"); got != "C:/" {
+		t.Fatalf("Windows drive parent=%q", got)
+	}
+	if got := joinRemotePath("C:/", "note.txt"); got != "C:/note.txt" {
+		t.Fatalf("Windows drive child=%q", got)
+	}
+	if got := dirRemotePath("//server/share/note.txt"); got != "//server/share" {
+		t.Fatalf("Windows UNC parent=%q", got)
+	}
+	if got := joinRemotePath("//server/share", "note.txt"); got != "//server/share/note.txt" {
+		t.Fatalf("Windows UNC child=%q", got)
+	}
+}
+
+func TestWindowsServerRelativePathValidation(t *testing.T) {
+	for _, input := range []string{`..\secret`, `C:/secret`, "CON", "aux.txt", "note. ", "folder /note", "a\x00b"} {
+		if isWindowsSafeRelativePath(input) {
+			t.Fatalf("unsafe Windows path %q accepted", input)
+		}
+	}
+	for _, input := range []string{"file.txt", "nested/note #日本語.txt"} {
+		if !isWindowsSafeRelativePath(input) {
+			t.Fatalf("safe Windows path %q rejected", input)
+		}
+	}
+}
+
 func TestParseTargetHostShorthand(t *testing.T) {
 	got, err := parseTarget("remote-host")
 	if err != nil {

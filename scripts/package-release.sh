@@ -15,6 +15,7 @@ staging_dir=$(mktemp -d "${TMPDIR:-/tmp}/ykview-release.XXXXXX")
 trap 'rm -rf "$staging_dir"' EXIT HUP INT TERM
 
 mkdir -p "$output_dir"
+output_dir=$(CDPATH= cd -- "$output_dir" && pwd)
 for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
 	goos=${target%-*}
 	goarch=${target#*-}
@@ -30,14 +31,28 @@ for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
 	tar -czf "$output_dir/$archive_base.tar.gz" -C "$staging_dir" "$archive_base"
 done
 
+for target in windows-amd64 windows-arm64; do
+	goarch=${target#*-}
+	archive_base="ykview-${version}-${target}"
+	package_dir="$staging_dir/$archive_base"
+	mkdir -p "$package_dir"
+
+	GOOS=windows GOARCH="$goarch" CGO_ENABLED=0 go build \
+		-trimpath -buildvcs=false -ldflags='-s -w -buildid=' \
+		-o "$package_dir/ykview.exe" \
+		"$repo_root/cmd/ykview"
+	cp "$repo_root/README.md" "$repo_root/LICENSE" "$repo_root/THIRD_PARTY_NOTICES.md" "$package_dir/"
+	(cd "$staging_dir" && zip -q -r "$output_dir/$archive_base.zip" "$archive_base")
+done
+
 if command -v sha256sum >/dev/null 2>&1; then
 	(
 		cd "$output_dir"
-		sha256sum -- *.tar.gz > SHA256SUMS
+		sha256sum -- *.tar.gz *.zip > SHA256SUMS
 	)
 else
 	(
 		cd "$output_dir"
-		shasum -a 256 *.tar.gz > SHA256SUMS
+		shasum -a 256 *.tar.gz *.zip > SHA256SUMS
 	)
 fi

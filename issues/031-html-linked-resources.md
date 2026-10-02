@@ -2,7 +2,7 @@
 
 ## Goal
 
-`dev1:~/workspace/read-linux-kernel/docs/kvm-svm/index.html`などのHTMLを開いた際に、別ファイルのJS/CSSとその依存resourceをブラウザで利用できるようにする。
+`example-host:~/site/index.html`などのHTMLを開いた際に、別ファイルのJS/CSSとその依存resourceをブラウザで利用できるようにする。
 
 ## Scope
 
@@ -58,5 +58,5 @@
 - local CLIと実HTTP serverでも確認した。修正前はscript/style/empty destinationのJS/CSS/JSONがviewer HTMLになっていた。修正後はclassic JS、CSSとimport先、moduleとimport先、JSONを元bytesと適切なContent-Typeで返す。
 - `index #日本語.html`をfile targetとして起動し、parent rootとescaped初期URLを確認した。document/frame/iframe/headerなしのsource navigation、resource HEADの空bodyとContent-Length、Rangeの206と元bytesも確認した。
 - root boundaryは既存の`cleanRelativeURLPath`とhandlerのroot joinを維持している。parent root外への相対参照は配信対象にしない。Fetch Metadata headerがないclientは既存preview behaviorを維持し、必要なら`?raw=1`を指定する。
-- 実ページの検証制限: `ssh -o BatchMode=yes -o ConnectTimeout=8 dev1`はconnection timeoutとなり、対象HTMLを読めなかった。
-- Browser検証制限: browser skillの接続とdocumentation取得は成功したが、actionが`Unable to load browser request-header policy`で失敗し、CSS適用とJS実行の目視確認はできなかった。HTTPのresource配信は検証済み。
+- 実ページの検証制限: 検証先へ接続できず、対象HTMLの確認は未実施。
+- Browser検証制限: browser skillの接続とdocumentation取得は成功したが、actionがbrowser tooling errorで失敗し、CSS適用とJS実行の目視確認はできなかった。HTTPのresource配信は検証済み。

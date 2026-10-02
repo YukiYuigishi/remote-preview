@@ -83,11 +83,11 @@ ykviewをインターネット接続なしでもMarkdown、Mermaid、syntax high
 - `go vet ./...`: passed
 - `go build ./...`: passed
 - `make check`: passed
-- `make install`: passed; installed `/Users/yuki/go/bin/ykview`
+- `make install`: passed; installed `<Go bin>/ykview`
 - asset endpointのGET/HEAD/404をunit testで確認。
 - templateにruntime CDN URLがないことをunit testで確認。
 - installed binaryからversioned asset endpointをcurlし、embedded JavaScriptの配信を確認。
-- browserでlocalhostのasset表示を試行したが、接続中のChrome extensionがloopback URLを`ERR_BLOCKED_BY_CLIENT`として遮断したため、ブラウザ上の実表示確認は完了できなかった。
+- browserでの目視確認は未実施。
 
 ## Remaining limitations
 

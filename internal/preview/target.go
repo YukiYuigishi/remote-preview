@@ -8,14 +8,16 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
 type remoteTarget struct {
-	Host  string
-	Root  string
-	Home  bool
-	Local bool
+	Host    string
+	Root    string
+	Home    bool
+	Local   bool
+	Windows bool
 }
 
 func parseTarget(s string) (remoteTarget, error) {
@@ -37,6 +39,9 @@ func parseTarget(s string) (remoteTarget, error) {
 
 	host := s[:i]
 	root := s[i+1:]
+	if strings.HasPrefix(root, "//") {
+		return remoteTarget{Host: host, Root: root}, nil
+	}
 	if strings.HasPrefix(root, "/") {
 		return remoteTarget{Host: host, Root: path.Clean(root)}, nil
 	}
@@ -50,7 +55,7 @@ func resolveLocalTarget(target remoteTarget) (remoteTarget, error) {
 	}
 
 	root := target.Root
-	if root == "~" || strings.HasPrefix(root, "~/") {
+	if root == "~" || strings.HasPrefix(root, "~/") || (runtime.GOOS == "windows" && strings.HasPrefix(root, `~\`)) {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return remoteTarget{}, fmt.Errorf("resolve local home: %w", err)
@@ -85,7 +90,7 @@ func resolvePreviewTarget(ctx context.Context, target remoteTarget, remote Remot
 			parent = filepath.Dir(target.Root)
 			name = filepath.Base(target.Root)
 		} else {
-			parent = path.Dir(target.Root)
+			parent = dirRemotePath(target.Root)
 			name = path.Base(target.Root)
 		}
 		target.Root = parent
@@ -99,22 +104,109 @@ func resolvePreviewTarget(ctx context.Context, target remoteTarget, remote Remot
 
 func (t *remoteTarget) setResolvedHome(home string) {
 	if t.Root == "" || t.Root == "~" {
-		t.Root = path.Clean(home)
+		t.Root = cleanRemotePath(home)
 	} else {
 		relative := strings.TrimPrefix(t.Root, "~/")
-		t.Root = path.Clean(path.Join(home, relative))
+		t.Root = joinRemotePath(home, relative)
 	}
 	t.Home = false
+}
+
+func isWindowsDriveAbsolute(value string) bool {
+	return len(value) >= 3 && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) && value[1] == ':' && value[2] == '/'
+}
+
+func isWindowsUNC(value string) bool {
+	if !strings.HasPrefix(value, "//") {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(value, "//"), "/")
+	return len(parts) >= 2 && parts[0] != "" && parts[1] != ""
+}
+
+func cleanRemotePath(value string) string {
+	if isWindowsUNC(value) {
+		return "//" + path.Clean(strings.TrimPrefix(value, "//"))
+	}
+	clean := path.Clean(value)
+	if isWindowsDriveAbsolute(value) && len(clean) == 2 && clean[1] == ':' {
+		return clean + "/"
+	}
+	return clean
+}
+
+func joinRemotePath(base, relative string) string {
+	if relative == "" {
+		return cleanRemotePath(base)
+	}
+	return cleanRemotePath(base + "/" + relative)
+}
+
+func dirRemotePath(value string) string {
+	if isWindowsUNC(value) {
+		parts := strings.Split(strings.TrimPrefix(value, "//"), "/")
+		if len(parts) <= 2 {
+			return cleanRemotePath(value)
+		}
+		return "//" + path.Dir(strings.TrimPrefix(value, "//"))
+	}
+	dir := path.Dir(value)
+	if isWindowsDriveAbsolute(value) && len(dir) == 2 && dir[1] == ':' {
+		return dir + "/"
+	}
+	return dir
+}
+
+func (t *remoteTarget) prepareWindows() error {
+	t.Windows = true
+	t.Root = strings.ReplaceAll(t.Root, `\`, "/")
+	if isWindowsDriveAbsolute(t.Root) || isWindowsUNC(t.Root) {
+		wasUNC := isWindowsUNC(t.Root)
+		t.Home = false
+		t.Root = cleanRemotePath(t.Root)
+		if wasUNC && !isWindowsUNC(t.Root) {
+			return fmt.Errorf("windows UNC target must include a server and share")
+		}
+		return nil
+	}
+	if strings.HasPrefix(t.Root, "/") {
+		return fmt.Errorf("windows server targets require a drive path such as host:C:/path")
+	}
+	if strings.Contains(t.Root, ":") {
+		return fmt.Errorf("windows server targets require an absolute drive path such as host:C:/path")
+	}
+	return nil
+}
+
+func isWindowsSafeRelativePath(value string) bool {
+	if strings.ContainsAny(value, "\\:\x00") {
+		return false
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "" || segment == "." || segment == ".." || strings.HasSuffix(segment, ".") || strings.HasSuffix(segment, " ") {
+			return false
+		}
+		stem, _, _ := strings.Cut(strings.ToUpper(segment), ".")
+		if stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" || len(stem) == 4 && (strings.HasPrefix(stem, "COM") || strings.HasPrefix(stem, "LPT")) && stem[3] >= '1' && stem[3] <= '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func isLocalTarget(s string) bool {
 	if s == "~" || strings.HasPrefix(s, "~/") {
 		return true
 	}
+	if runtime.GOOS == "windows" {
+		if strings.HasPrefix(s, `~\`) || strings.HasPrefix(s, `.\`) || strings.HasPrefix(s, `..\`) || strings.HasPrefix(s, `\`) || filepath.VolumeName(s) != "" {
+			return true
+		}
+	}
 	if filepath.IsAbs(s) {
 		return true
 	}
-	return s == "." || s == ".." || strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../")
+	return s == "." || s == ".." || strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../") || strings.HasPrefix(s, "/")
 }
 
 func cleanRelativeURLPath(p string) string {
