@@ -31,6 +31,9 @@
 
 ## Current state
 
-- `master`は`origin/master`に対して40 commits ahead、47 commits behind。
-- 両系列には同等の実装commitが異なるhashで含まれ、origin側には追加のMarkdown修正とWindows対応がある。
-- merge作業は未実施。
+- 完了。`origin/master`の`87ebf9c`までをmerge commit `27c208a`でローカル`master`へ取り込んだ。
+- 両系列には同等の実装commitが異なるhashで含まれていたため多数の競合が発生した。ローカルtipとorigin側の対応feature tipを比較し、コード差分がないことを確認したうえで、origin側の追加修正を含むtreeを基準に解消した。
+- ローカル固有だった4つのissue文書の差分は、origin側でhost名やローカル環境情報を一般化した変更だったため、origin版を採用した。
+- `git merge-base --is-ancestor origin/master master`: passed
+- `make check`: passed（`go test ./...`、`go test -race ./...`、`go vet ./...`、`go build ./...`）
+- merge commit作成後の`git status --short --branch`は`master...origin/master [ahead 42]`で、作業ツリーはcleanだった。
